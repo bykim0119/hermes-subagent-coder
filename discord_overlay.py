@@ -353,14 +353,102 @@ async def _handle_coder_followup(
 
 
 # ----------------------------------------------------------------------
-# Install: setattr helper methods + wrap stock methods.
+# Idempotent coder-state helpers (shared by the wraps and the late retrofit).
+# ----------------------------------------------------------------------
+
+def _ensure_coder_state(self) -> None:
+    """Create ``_coder_sessions`` + ``_coder_flusher`` on the adapter if absent."""
+    if getattr(self, "_coder_sessions", None) is None:
+        from .coder_config import coder_setting
+        from .coder_sessions import CoderSessionManager
+        self._coder_sessions = CoderSessionManager(
+            idle_timeout_seconds=coder_setting(
+                "idle_timeout_seconds",
+                env_var="HERMES_CODER_IDLE_TIMEOUT_S",
+                default=7200,
+                cast=int,
+            ),
+            max_concurrent=coder_setting(
+                "max_concurrent",
+                env_var="HERMES_CODER_MAX_CONCURRENT",
+                default=3,
+                cast=int,
+            ),
+        )
+    if not hasattr(self, "_coder_flusher"):
+        self._coder_flusher = None  # set in post-connect init
+
+
+def _start_coder_progress(self) -> None:
+    """Start the progress debouncer + register on the coder event bus.
+
+    Must run inside the adapter's event loop (uses ``get_running_loop``).
+    Idempotent: the flusher is created once, and the bus handler is keyed on
+    ``self.on_coder_event``.
+    """
+    import asyncio
+
+    _ensure_coder_state(self)
+    if getattr(self, "_coder_flusher", None) is None:
+        from .coder_config import coder_setting
+        from .coder_progress_formatter import DebouncedFlusher
+        self._coder_flusher = DebouncedFlusher(
+            interval_ms=coder_setting(
+                "progress_debounce_ms",
+                env_var="HERMES_CODER_DEBOUNCE_MS",
+                default=250,
+                cast=int,
+            ),
+            publish=self._publish_to_thread,
+        )
+        self._coder_flusher.start()
+    # Publish this adapter's coder hook to the gateway-level bus so the coder
+    # sink (background thread, outside any parent agent turn) can route NDJSON
+    # events to our threads. set_global_sessions exposes our CoderSessionManager
+    # so the sink captures codex session UUIDs.
+    try:
+        from . import coder_event_bus
+        from .coder_sessions import set_global_sessions
+
+        set_global_sessions(self._coder_sessions)
+        coder_event_bus.register_handler(
+            self.on_coder_event,
+            asyncio.get_running_loop(),
+        )
+    except Exception as _e:
+        logger.debug("[%s] coder_event_bus register failed: %s", self.name, _e)
+
+
+def _add_code_command(self) -> None:
+    """Add the ``/code`` slash command to the client tree (idempotent)."""
+    client = getattr(self, "_client", None)
+    if client is None:
+        return
+    tree = client.tree
+    try:
+        if tree.get_command("code") is not None:
+            return
+    except Exception:
+        pass
+
+    @tree.command(name="code", description="Spawn a coder sub-agent for this task")
+    @discord.app_commands.describe(task="The coding task to delegate to the coder")
+    async def slash_code(interaction: discord.Interaction, task: str):
+        await self._handle_code_slash(interaction, task)
+
+
+# ----------------------------------------------------------------------
+# Install: setattr helper methods + wrap stock methods + late retrofit.
 # ----------------------------------------------------------------------
 
 def install_discord_coder_overlay() -> None:
     """Attach coder methods + wraps onto ``DiscordAdapter`` (gateway mode only).
 
     No-op when ``gateway.platforms.discord`` is not imported (CLI mode) or
-    when already installed (idempotent via a class sentinel).
+    when already installed (idempotent via a class sentinel). In gateway mode,
+    plugin discovery can run *after* the adapter has already connected (hermes
+    discovers plugins lazily on the first turn), so after installing the class
+    wraps we also retrofit any live, already-connected adapter instance.
     """
     disc = sys.modules.get("gateway.platforms.discord")
     DiscordAdapter = getattr(disc, "DiscordAdapter", None) if disc is not None else None
@@ -370,6 +458,7 @@ def install_discord_coder_overlay() -> None:
         )
         return
     if getattr(DiscordAdapter, "_subagent_coder_overlay_installed", False):
+        _retrofit_live_discord_adapter()  # discovery may re-run; ensure live wiring
         return
 
     # 1. Attach coder helper methods onto the adapter class.
@@ -386,24 +475,7 @@ def install_discord_coder_overlay() -> None:
 
     def _wrapped_init(self, *args, **kwargs):
         _orig_init(self, *args, **kwargs)
-        from .coder_config import coder_setting
-        from .coder_sessions import CoderSessionManager
-        _coder_idle = coder_setting(
-            "idle_timeout_seconds",
-            env_var="HERMES_CODER_IDLE_TIMEOUT_S",
-            default=7200,
-            cast=int,
-        )
-        _coder_max = coder_setting(
-            "max_concurrent",
-            env_var="HERMES_CODER_MAX_CONCURRENT",
-            default=3,
-            cast=int,
-        )
-        self._coder_sessions = CoderSessionManager(
-            idle_timeout_seconds=_coder_idle, max_concurrent=_coder_max
-        )
-        self._coder_flusher = None  # set in post-connect init
+        _ensure_coder_state(self)
 
     DiscordAdapter.__init__ = _wrapped_init
 
@@ -415,36 +487,7 @@ def install_discord_coder_overlay() -> None:
 
     async def _wrapped_post_connect(self, *args, **kwargs):
         result = await _orig_post_connect(self, *args, **kwargs)
-        import asyncio
-        # Start the coder progress debouncer (publishes to threads).
-        if getattr(self, "_coder_flusher", None) is None:
-            from .coder_config import coder_setting
-            from .coder_progress_formatter import DebouncedFlusher
-            self._coder_flusher = DebouncedFlusher(
-                interval_ms=coder_setting(
-                    "progress_debounce_ms",
-                    env_var="HERMES_CODER_DEBOUNCE_MS",
-                    default=250,
-                    cast=int,
-                ),
-                publish=self._publish_to_thread,
-            )
-            self._coder_flusher.start()
-        # Publish this adapter's coder hook to the gateway-level bus so the
-        # coder sink (background thread, outside any parent agent turn) can
-        # route NDJSON events to our threads. set_global_sessions exposes our
-        # CoderSessionManager so the sink captures codex session UUIDs.
-        try:
-            from . import coder_event_bus
-            from .coder_sessions import set_global_sessions
-
-            set_global_sessions(self._coder_sessions)
-            coder_event_bus.register_handler(
-                self.on_coder_event,
-                asyncio.get_running_loop(),
-            )
-        except Exception as _e:
-            logger.debug("[%s] coder_event_bus register failed: %s", self.name, _e)
+        _start_coder_progress(self)
         return result
 
     DiscordAdapter._run_post_connect_initialization = _wrapped_post_connect
@@ -474,14 +517,15 @@ def install_discord_coder_overlay() -> None:
     _orig_handle_message = DiscordAdapter._handle_message
 
     async def _wrapped_handle_message(self, message):
-        if isinstance(message.channel, discord.Thread):
-            _cid = self._coder_sessions.get_coder_by_thread(str(message.channel.id))
+        sessions = getattr(self, "_coder_sessions", None)
+        if sessions is not None and isinstance(message.channel, discord.Thread):
+            _cid = sessions.get_coder_by_thread(str(message.channel.id))
             if _cid:
                 from .delegate_background import is_cancel_command
                 if is_cancel_command(message.content):
                     await self._cancel_coder_run(_cid, message.channel)
                     return
-                self._coder_sessions.touch(_cid)
+                sessions.touch(_cid)
                 await self._handle_coder_followup(
                     _cid, message.content, message.channel
                 )
@@ -496,18 +540,72 @@ def install_discord_coder_overlay() -> None:
 
     def _wrapped_register_slash(self, *args, **kwargs):
         result = _orig_register_slash(self, *args, **kwargs)
-        if not self._client:
-            return result
-        tree = self._client.tree
-
-        @tree.command(name="code", description="Spawn a coder sub-agent for this task")
-        @discord.app_commands.describe(task="The coding task to delegate to the coder")
-        async def slash_code(interaction: discord.Interaction, task: str):
-            await self._handle_code_slash(interaction, task)
-
+        _add_code_command(self)
         return result
 
     DiscordAdapter._register_slash_commands = _wrapped_register_slash
 
     DiscordAdapter._subagent_coder_overlay_installed = True
     logger.info("subagent_coder: DiscordAdapter coder overlay installed")
+
+    # 7. Retrofit a live adapter if discovery ran after it connected.
+    _retrofit_live_discord_adapter()
+
+
+def _retrofit_live_discord_adapter() -> None:
+    """Wire a DiscordAdapter that was already created/connected before the
+    overlay installed (gateway discovers plugins lazily, often after connect).
+
+    The class wraps don't help an instance whose ``__init__`` /
+    ``_run_post_connect_initialization`` / ``_register_slash_commands`` already
+    ran, so we reach the live instance via the gateway runner weakref and apply
+    the coder state, ``/code`` command, progress flusher/bus, and a tree resync
+    directly on its event loop.
+    """
+    import asyncio
+
+    gw = sys.modules.get("gateway.run")
+    ref = getattr(gw, "_gateway_runner_ref", None) if gw is not None else None
+    runner = ref() if callable(ref) else None
+    if runner is None:
+        return
+    adapter = None
+    for a in getattr(runner, "adapters", {}).values():
+        if type(a).__name__ == "DiscordAdapter":
+            adapter = a
+            break
+    if adapter is None:
+        return
+    if getattr(adapter, "_subagent_coder_retrofitted", False):
+        return
+    adapter._subagent_coder_retrofitted = True
+
+    _ensure_coder_state(adapter)
+
+    client = getattr(adapter, "_client", None)
+    loop = getattr(client, "loop", None) if client is not None else None
+    if loop is None or not getattr(loop, "is_running", lambda: False)():
+        # Not connected yet — the normal connect-path wraps will wire it.
+        return
+
+    async def _retro() -> None:
+        try:
+            _add_code_command(adapter)
+        except Exception:
+            logger.debug("subagent_coder: retrofit add /code failed", exc_info=True)
+        try:
+            _start_coder_progress(adapter)
+        except Exception:
+            logger.debug("subagent_coder: retrofit start progress failed", exc_info=True)
+        try:
+            await adapter._client.tree.sync()
+            logger.info(
+                "subagent_coder: retrofitted live DiscordAdapter (/code added + synced)"
+            )
+        except Exception:
+            logger.debug("subagent_coder: retrofit tree.sync failed", exc_info=True)
+
+    try:
+        asyncio.run_coroutine_threadsafe(_retro(), loop)
+    except Exception:
+        logger.debug("subagent_coder: retrofit schedule failed", exc_info=True)

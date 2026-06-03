@@ -44,6 +44,10 @@ def test_registry_handler_falls_back_to_contextvar(monkeypatch):
     """delegate_task_background이 registry 경로로 dispatch될 때(parent_agent 없음)
     _dispatch_parent_agent ContextVar에서 parent_agent를 끌어온다."""
     from tools.registry import registry
+    import subagent_coder.delegate_background as _db
+    # Re-assert THIS module's handler (a bundled copy in a dev fork can have
+    # re-registered an equivalent handler bound to its own globals).
+    _db.register_delegate_task_background()
 
     agent = MagicMock()
     agent.task_id = "parent-task"
@@ -70,6 +74,8 @@ def test_registry_handler_falls_back_to_contextvar(monkeypatch):
 def test_registry_handler_no_agent_returns_error(monkeypatch):
     """ContextVar도 없고 kw에도 parent_agent 없으면 구조화된 에러."""
     from tools.registry import registry
+    import subagent_coder.delegate_background as _db
+    _db.register_delegate_task_background()
 
     # ContextVar default None 상태
     assert _dispatch_parent_agent.get() is None

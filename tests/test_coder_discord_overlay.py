@@ -35,7 +35,7 @@ def _make_stub_adapter_cls():
     """매 테스트 fresh 클래스 — install이 클래스 sentinel로 idempotent라
     클래스를 새로 만들어야 wrap이 다시 적용된다."""
 
-    class _StubDiscordAdapter:
+    class DiscordAdapter:  # name matches real class (retrofit matches by name)
         def __init__(self, *args, **kwargs):
             self.name = "discord"
             self._client = None
@@ -57,7 +57,7 @@ def _make_stub_adapter_cls():
             self.slash_called = True
             return "orig_slash"
 
-    return _StubDiscordAdapter
+    return DiscordAdapter
 
 
 def _install_on(cls, monkeypatch):
@@ -216,6 +216,7 @@ def test_register_slash_adds_code_command(monkeypatch):
     cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
     adapter = cls()
     adapter._client = MagicMock()
+    adapter._client.tree.get_command.return_value = None  # /code not yet on tree
 
     result = adapter._register_slash_commands()
     assert result == "orig_slash"
@@ -277,3 +278,36 @@ def test_post_connect_starts_flusher_and_registers(monkeypatch):
     mock_reg.assert_called_once()
     # register_handler 첫 인자 = adapter.on_coder_event
     assert mock_reg.call_args.args[0] == adapter.on_coder_event
+
+
+# --- late retrofit (discovery ran after adapter connected) -------------------
+
+def test_retrofit_wires_live_adapter_state(monkeypatch):
+    """overlay가 어댑터 connect 이후 설치될 때, live 인스턴스에 코더 상태를
+    retrofit 하는지. (loop 미실행 = connect 전 → state만 주입하고 종료)"""
+    cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
+
+    # __init__ 거치지 않은 '오버레이 이전' 인스턴스 시뮬
+    adapter = cls.__new__(cls)
+    adapter.name = "discord"
+    adapter._client = None  # 아직 connect 전 → loop 없음
+
+    runner = MagicMock()
+    runner.adapters = {"discord": adapter}
+    fake_gw = types.ModuleType("gateway.run")
+    fake_gw._gateway_runner_ref = lambda: runner
+    monkeypatch.setitem(sys.modules, "gateway.run", fake_gw)
+
+    discord_overlay._retrofit_live_discord_adapter()
+
+    from subagent_coder.coder_sessions import CoderSessionManager
+    assert isinstance(adapter._coder_sessions, CoderSessionManager)
+    assert adapter._coder_flusher is None
+    assert adapter._subagent_coder_retrofitted is True
+
+
+def test_retrofit_noop_without_runner(monkeypatch):
+    """gateway.run 미로드/ runner 없음이면 retrofit no-op (예외 없음)."""
+    _install_on(_make_stub_adapter_cls(), monkeypatch)
+    monkeypatch.delitem(sys.modules, "gateway.run", raising=False)
+    discord_overlay._retrofit_live_discord_adapter()  # 예외 없이 통과

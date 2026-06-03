@@ -472,22 +472,34 @@ DELEGATE_TASK_BACKGROUND_SCHEMA = {
 # ``from . import delegate_background``). Dispatch itself is intercepted by the
 # AIAgent._invoke_tool wrap (parent_agent injection); this registration exists
 # so the tool schema/check_fn are advertised to the model.
-registry.register(
-    name="delegate_task_background",
-    toolset="delegation",
-    schema=DELEGATE_TASK_BACKGROUND_SCHEMA,
-    handler=lambda args, **kw: json.dumps(
-        delegate_task_background(
-            # Sequential path: registry.dispatch passes no parent_agent, so fall
-            # back to the ContextVar set by the _execute_tool_calls_sequential
-            # wrap. Concurrent path bypasses this handler (the _invoke_tool wrap
-            # injects parent_agent=self directly).
-            parent_agent=kw.get("parent_agent") or _dispatch_parent_agent.get(),
-            goal=args.get("goal"),
-            context=args.get("context") or "",
+def register_delegate_task_background() -> None:
+    """Register the ``delegate_task_background`` tool on the shared registry.
+
+    Run once at import. Exposed as a function (and idempotent via
+    ``registry.register``'s overwrite semantics) so tests can re-assert that the
+    *this-module* handler is the registered one — a bundled copy of this plugin
+    in a dev fork can otherwise re-register an equivalent handler bound to its
+    own module globals, which would defeat ``patch`` targets on this module.
+    """
+    registry.register(
+        name="delegate_task_background",
+        toolset="delegation",
+        schema=DELEGATE_TASK_BACKGROUND_SCHEMA,
+        handler=lambda args, **kw: json.dumps(
+            delegate_task_background(
+                # Sequential path: registry.dispatch passes no parent_agent, so
+                # fall back to the ContextVar set by the
+                # _execute_tool_calls_sequential wrap. Concurrent path bypasses
+                # this handler (the _invoke_tool wrap injects parent_agent=self).
+                parent_agent=kw.get("parent_agent") or _dispatch_parent_agent.get(),
+                goal=args.get("goal"),
+                context=args.get("context") or "",
+            ),
+            ensure_ascii=False,
         ),
-        ensure_ascii=False,
-    ),
-    check_fn=check_delegate_requirements,
-    emoji="🧑‍💻",
-)
+        check_fn=check_delegate_requirements,
+        emoji="🧑‍💻",
+    )
+
+
+register_delegate_task_background()
