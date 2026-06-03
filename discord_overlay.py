@@ -451,11 +451,20 @@ def install_discord_coder_overlay() -> None:
     wraps we also retrofit any live, already-connected adapter instance.
     """
     disc = sys.modules.get("gateway.platforms.discord")
-    DiscordAdapter = getattr(disc, "DiscordAdapter", None) if disc is not None else None
+    if disc is None:
+        # Gateway mode but the platform module isn't imported yet (discovery ran
+        # before _create_adapter). Import it now so the class exists to wrap
+        # *before* the adapter is created — otherwise the wraps would be missed.
+        try:
+            import gateway.platforms.discord as disc  # noqa: F811
+        except Exception:
+            logger.debug(
+                "subagent_coder: gateway.platforms.discord unavailable — skipping Discord overlay"
+            )
+            return
+    DiscordAdapter = getattr(disc, "DiscordAdapter", None)
     if DiscordAdapter is None:
-        logger.debug(
-            "subagent_coder: gateway.platforms.discord not loaded — skipping Discord overlay (CLI mode)"
-        )
+        logger.debug("subagent_coder: DiscordAdapter not found — skipping Discord overlay")
         return
     if getattr(DiscordAdapter, "_subagent_coder_overlay_installed", False):
         _retrofit_live_discord_adapter()  # discovery may re-run; ensure live wiring

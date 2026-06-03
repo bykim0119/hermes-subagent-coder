@@ -477,18 +477,22 @@ def _install_discord_coder_overlay() -> None:
     _register_slash_commands) to restore every coder behavior that used to live
     inline in ``gateway/platforms/discord.py``.
 
-    DiscordAdapter is created only after discover_plugins() runs register(ctx)
-    (gateway/run.py: discover < _create_adapter), so the class wraps land before
-    any adapter exists. gateway.platforms.discord is gateway-only and heavy and
-    pulls in the discord.py library, so we guard on it already being imported
-    before touching discord_overlay (which imports discord at module top) — this
-    keeps the install a no-op in CLI mode where discord.py may be absent.
+    Plugin discovery timing vs. the Discord adapter lifecycle is not fixed:
+    hermes may discover plugins before ``_create_adapter`` imports the discord
+    platform module, or lazily on the first turn after the adapter already
+    connected. So we only gate on *gateway mode* here (``gateway.run`` loaded);
+    ``install_discord_coder_overlay`` then ensure-imports the platform module so
+    the class exists to wrap, and retrofits a live adapter if one already
+    connected. In CLI mode (no gateway) we skip without importing discord.py.
     """
     import sys
 
-    if "gateway.platforms.discord" not in sys.modules:
+    if (
+        "gateway.platforms.discord" not in sys.modules
+        and "gateway.run" not in sys.modules
+    ):
         logger.debug(
-            "subagent_coder: gateway.platforms.discord not loaded — skipping Discord overlay (CLI mode)"
+            "subagent_coder: not in gateway mode — skipping Discord overlay (CLI mode)"
         )
         return
 
