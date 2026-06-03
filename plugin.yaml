@@ -1,0 +1,15 @@
+name: subagent_coder
+manifest_version: 1
+version: 0.1.0
+label: "Codex Coder Sub-Agent (Discord)"
+author: "bykim0119"
+description: |
+  Background coding delegation via the Codex CLI.
+  Spawns a ``codex exec`` subprocess in a daemon thread and streams live
+  progress to the platform UI. Adds the ``delegate_task_background`` tool plus a
+  Discord overlay (``/code`` slash command + coder-thread follow-ups). The core
+  is platform-agnostic; Discord is the first integration.
+
+  Requires the ``codex`` CLI on PATH and Codex auth (``~/.codex/auth.json``).
+provides_tools:
+  - delegate_task_background

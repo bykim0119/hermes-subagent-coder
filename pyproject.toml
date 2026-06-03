@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-subagent-coder"
+version = "0.1.0"
+description = "Codex coder sub-agent plugin for Hermes (delegate_task_background + Discord overlay)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "bykim0119" }]
+dependencies = []
+
+# This is a hermes plugin loaded from ~/.hermes/plugins/, not a pip-installed
+# package — it ships no importable top-level package of its own. The metadata
+# here exists for dev tooling (pytest) and documentation only.
+
+[project.optional-dependencies]
+# The tests monkey-patch and import stock hermes modules (run_agent, tools.*,
+# gateway.*), so a hermes-agent install must be importable to run them.
+dev = [
+    "hermes-agent",
+    "pytest",
+    "pytest-asyncio",
+    "discord.py>=2.0",
+    "pyyaml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
