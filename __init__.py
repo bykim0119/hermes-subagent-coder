@@ -487,10 +487,17 @@ def _install_discord_coder_overlay() -> None:
     """
     import sys
 
-    if (
-        "gateway.platforms.discord" not in sys.modules
-        and "gateway.run" not in sys.modules
-    ):
+    # Detect gateway mode. Plugin discovery can run *before* gateway.run is
+    # imported (the CLI imports gateway.run lazily, after discovery), so a
+    # sys.modules check alone misfires as "CLI mode" and skips the overlay
+    # entirely. The launch command (`hermes gateway run`) is the reliable
+    # signal, so also consult sys.argv.
+    _gateway_mode = (
+        "gateway.platforms.discord" in sys.modules
+        or "gateway.run" in sys.modules
+        or "gateway" in sys.argv
+    )
+    if not _gateway_mode:
         logger.debug(
             "subagent_coder: not in gateway mode — skipping Discord overlay (CLI mode)"
         )

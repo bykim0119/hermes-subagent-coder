@@ -72,10 +72,34 @@ def _install_on(cls, monkeypatch):
 # --- CLI 모드 / 가드 ----------------------------------------------------------
 
 def test_install_noop_in_cli_mode(monkeypatch):
-    """gateway.platforms.discord 미로드면 _install_discord_coder_overlay no-op."""
+    """gateway 신호가 전혀 없으면 _install_discord_coder_overlay no-op."""
     monkeypatch.delitem(sys.modules, "gateway.platforms.discord", raising=False)
-    # 예외 없이 통과해야 함(overlay 모듈 import도 안 함)
-    _install_discord_coder_overlay()
+    monkeypatch.delitem(sys.modules, "gateway.run", raising=False)
+    monkeypatch.setattr(sys, "argv", ["hermes", "chat"])
+    # 예외 없이 통과 + overlay 설치 함수 미호출
+    with patch.object(
+        discord_overlay, "install_discord_coder_overlay"
+    ) as install:
+        _install_discord_coder_overlay()
+    install.assert_not_called()
+
+
+def test_install_proceeds_when_only_argv_signals_gateway(monkeypatch):
+    """회귀: 이른 plugin discovery는 gateway.run import 전에 실행될 수 있다.
+
+    그때 sys.modules엔 gateway.run/gateway.platforms.discord가 둘 다 없어
+    sys.modules만 보면 'CLI 모드'로 오판하고 overlay를 통째로 건너뛴다
+    (그 결과 /code 슬래시 + 코더 Discord 기능 전부 누락). 실행 명령
+    ``hermes gateway run``의 sys.argv 신호로 gateway 모드를 잡아야 한다.
+    """
+    monkeypatch.delitem(sys.modules, "gateway.platforms.discord", raising=False)
+    monkeypatch.delitem(sys.modules, "gateway.run", raising=False)
+    monkeypatch.setattr(sys, "argv", ["hermes", "gateway", "run", "--replace"])
+    with patch.object(
+        discord_overlay, "install_discord_coder_overlay"
+    ) as install:
+        _install_discord_coder_overlay()
+    install.assert_called_once()
 
 
 def test_overlay_install_noop_when_adapter_missing(monkeypatch):
