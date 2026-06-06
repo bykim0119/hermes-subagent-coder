@@ -287,7 +287,7 @@ def _build_coder_spawn_callback(runner, source, session_key, run_generation, loo
         if not hasattr(status_adapter, "create_coder_thread"):
             return
         try:
-            asyncio.run_coroutine_threadsafe(
+            fut = asyncio.run_coroutine_threadsafe(
                 status_adapter.create_coder_thread(
                     coder_run_id=coder_run_id,
                     goal=goal,
@@ -296,6 +296,17 @@ def _build_coder_spawn_callback(runner, source, session_key, run_generation, loo
                 ),
                 loop,
             )
+
+            # run_coroutine_threadsafe returns a future that is otherwise never
+            # awaited, so create_coder_thread exceptions would vanish silently.
+            # Surface them at debug level for diagnosability.
+            def _log_thread_result(f):
+                try:
+                    f.result()
+                except Exception:
+                    logger.debug("create_coder_thread raised", exc_info=True)
+
+            fut.add_done_callback(_log_thread_result)
         except Exception as _e:
             logger.debug("coder_spawn_callback error: %s", _e)
 
@@ -341,7 +352,25 @@ def _install_gateway_coder_spawn_wraps() -> None:
         logger.info("subagent_coder: AIAgent.run_conversation wrapped for spawn-callback install")
 
     # GatewayRunner._run_agent wrap — only in gateway mode.
+    # Plugin discovery/register can run *before* the CLI lazily imports
+    # gateway.run (observed: register at boot, gateway.run loaded ~45s later).
+    # A bare sys.modules check therefore misfires as "CLI mode" and the
+    # _run_agent wrap (which sets the per-turn coder_spawn_callback ContextVar)
+    # is permanently skipped — so delegate_task_background never opens a Discord
+    # thread. Use the launch command (`hermes gateway run`) as the reliable
+    # signal and ensure-import gateway.run so GatewayRunner exists to wrap.
+    # (Same timing fix as the Discord overlay; wrapping the class persists for
+    # the GatewayRunner instance created later at gateway start.)
     gw = sys.modules.get("gateway.run")
+    if gw is None and "gateway" in sys.argv:
+        try:
+            import gateway.run as gw  # noqa: F811
+        except Exception:
+            logger.debug(
+                "subagent_coder: could not import gateway.run — skipping _run_agent wrap",
+                exc_info=True,
+            )
+            return
     GatewayRunner = getattr(gw, "GatewayRunner", None) if gw is not None else None
     if GatewayRunner is None:
         logger.debug("subagent_coder: gateway.run not loaded — skipping _run_agent wrap (CLI mode)")
