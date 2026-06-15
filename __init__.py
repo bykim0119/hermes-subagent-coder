@@ -54,6 +54,9 @@ def register(ctx) -> None:
     _install_coder_spawn_callback_slot()
     _install_gateway_coder_spawn_wraps()
     _install_coder_toolset_membership()
+    from . import coder_orchestration
+    coder_orchestration.register_orchestration_tools()
+    coder_orchestration.install_orchestration_toolset_membership()
     _install_discord_coder_overlay()
     logger.info(
         "subagent_coder: register(ctx) complete "

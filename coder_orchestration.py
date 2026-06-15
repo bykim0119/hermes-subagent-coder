@@ -11,9 +11,12 @@ agent-spawn된 코더("오케스트레이션 런")에 대한 메인 에이전트
 """
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from typing import Any, Dict, List, Optional
+
+from tools.delegate_tool import registry, check_delegate_requirements
 
 from .delegate_background import (
     cancel_coder_run,
@@ -171,3 +174,81 @@ def notify_main_on_completion(coder_run_id: str) -> None:
         )
     except Exception:
         logger.exception("코더 %s 완료 알림 주입 실패", coder_run_id)
+
+
+CODER_STATUS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "coder_run_id": {
+            "type": "string",
+            "description": "특정 코더 런 ID. 생략하면 오케스트레이션 코더 전체 요약 + 용량.",
+        },
+        "include": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["result", "log"]},
+            "description": "상세 조회 시 결과 전문(result)/로그 tail(log)을 포함.",
+        },
+    },
+}
+
+CANCEL_CODER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "coder_run_id": {
+            "type": "string",
+            "description": "취소할 오케스트레이션 코더의 런 ID.",
+        },
+    },
+    "required": ["coder_run_id"],
+}
+
+
+def register_orchestration_tools() -> None:
+    """coder_status / cancel_coder를 공유 registry에 등록(import 시 1회, 멱등)."""
+    registry.register(
+        name="coder_status",
+        toolset="delegation",
+        schema=CODER_STATUS_SCHEMA,
+        handler=lambda args, **kw: json.dumps(
+            coder_status(args.get("coder_run_id"), args.get("include")),
+            ensure_ascii=False,
+            default=str,
+        ),
+        check_fn=check_delegate_requirements,
+        emoji="📋",
+    )
+    registry.register(
+        name="cancel_coder",
+        toolset="delegation",
+        schema=CANCEL_CODER_SCHEMA,
+        handler=lambda args, **kw: json.dumps(
+            cancel_coder(args.get("coder_run_id")),
+            ensure_ascii=False,
+        ),
+        check_fn=check_delegate_requirements,
+        emoji="🛑",
+    )
+
+
+def install_orchestration_toolset_membership() -> None:
+    """coder_status/cancel_coder를 delegate_task를 가진 모든 toolset에 추가.
+
+    _install_coder_toolset_membership(delegate_task_background용)과 동일한 패턴:
+    by-reference core는 in-place mutation으로, concatenation 복사본은 제네릭 스캔으로.
+    """
+    import toolsets
+
+    new_tools = ("coder_status", "cancel_coder")
+    core = toolsets._HERMES_CORE_TOOLS
+    for name in new_tools:
+        if name not in core:
+            core.append(name)
+
+    for ts in toolsets.TOOLSETS.values():
+        tools = ts.get("tools")
+        if tools is core or not isinstance(tools, list):
+            continue
+        if "delegate_task" in tools:
+            for name in new_tools:
+                if name not in tools:
+                    tools.append(name)

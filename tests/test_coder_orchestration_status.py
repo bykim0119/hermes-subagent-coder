@@ -145,3 +145,25 @@ def test_cancel_coder_rejects_code_run(monkeypatch):
 
 def test_cancel_coder_missing_id():
     assert "error" in orch.cancel_coder("")
+
+
+def test_register_and_membership():
+    import toolsets
+    from toolsets import resolve_toolset
+
+    orch.register_orchestration_tools()
+    orch.install_orchestration_toolset_membership()
+
+    from tools.delegate_tool import registry
+    assert registry.get_entry("coder_status") is not None
+    assert registry.get_entry("cancel_coder") is not None
+
+    # delegate_task가 있는 toolset에 두 도구가 들어감
+    for ts_name in ("delegation", "hermes-discord"):
+        resolved = resolve_toolset(ts_name)
+        assert "coder_status" in resolved, f"{ts_name} coder_status 누락"
+        assert "cancel_coder" in resolved, f"{ts_name} cancel_coder 누락"
+
+    # 멱등
+    orch.install_orchestration_toolset_membership()
+    assert toolsets._HERMES_CORE_TOOLS.count("coder_status") == 1
