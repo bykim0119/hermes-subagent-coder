@@ -41,3 +41,25 @@ def test_sink_captures_events_into_log():
         {"event": "agent.thinking", "data": {"text": "hi"}},
         {"event": "agent.message", "data": {"text": "done"}},
     ]
+
+
+def test_spawn_callback_records_routing():
+    from subagent_coder import _build_coder_spawn_callback
+
+    db._register_coder_run("coder-cb", "parent", "goal")
+    adapter = MagicMock()
+    runner = MagicMock()
+    runner.adapters = {"discord": adapter}
+    runner._is_session_run_current.return_value = True
+    src = MagicMock()
+    src.platform = "discord"
+    src.chat_id = "C1"
+    src.thread_id = "T1"
+
+    cb = _build_coder_spawn_callback(runner, src, "skey", 1, loop="LOOP")
+    with patch("asyncio.run_coroutine_threadsafe"):
+        cb("coder-cb", "goal")
+
+    rec = db._CODER_RUN_REGISTRY["coder-cb"]
+    assert rec["main_source"] is src
+    assert rec["main_loop"] == "LOOP"

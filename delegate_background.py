@@ -83,6 +83,90 @@ def get_coder_run(coder_run_id: str) -> Optional[Dict[str, Any]]:
         return dict(rec) if rec else None
 
 
+def record_main_routing(coder_run_id: str, source: Any, loop: Any) -> None:
+    """메인 세션 라우팅 메타데이터 + 이벤트 루프를 런 레코드에 저장.
+
+    ``main_source`` 존재가 런을 *오케스트레이션 대상*으로 표시하는 단일 게이트다
+    (agent의 delegate_task_background 경로에서만 기록; /code 슬래시는 기록 안 함).
+    오케스트레이션 런만 coder_status에 보이고, cancel_coder로 취소되며, 완료 시
+    메인을 깨운다.
+    """
+    with _CODER_RUN_LOCK:
+        rec = _CODER_RUN_REGISTRY.get(coder_run_id)
+        if rec is not None:
+            rec["main_source"] = source
+            rec["main_loop"] = loop
+
+
+def list_orchestration_runs() -> List[Dict[str, Any]]:
+    """오케스트레이션 런 전체의 요약 리스트(라우팅 없는 /code 런은 제외)."""
+    with _CODER_RUN_LOCK:
+        return [
+            {
+                "coder_run_id": cid,
+                "goal": rec.get("goal"),
+                "status": rec.get("status"),
+                "started_at": rec.get("started_at"),
+            }
+            for cid, rec in _CODER_RUN_REGISTRY.items()
+            if rec.get("main_source") is not None
+        ]
+
+
+def get_orchestration_run(
+    coder_run_id: str, include: Optional[List[str]] = None
+) -> Optional[Dict[str, Any]]:
+    """단일 오케스트레이션 런 상세. 라우팅 없는 런이면 None.
+
+    ``include``에 "result"가 있으면 result/error, "log"가 있으면 log 전체를 포함.
+    """
+    wanted = set(include or [])
+    with _CODER_RUN_LOCK:
+        rec = _CODER_RUN_REGISTRY.get(coder_run_id)
+        if rec is None or rec.get("main_source") is None:
+            return None
+        out: Dict[str, Any] = {
+            "coder_run_id": coder_run_id,
+            "goal": rec.get("goal"),
+            "status": rec.get("status"),
+            "started_at": rec.get("started_at"),
+            "parent_task_id": rec.get("parent_task_id"),
+        }
+        if "result" in wanted:
+            if rec.get("result") is not None:
+                out["result"] = rec.get("result")
+            if rec.get("error") is not None:
+                out["error"] = rec.get("error")
+        if "log" in wanted:
+            out["log"] = list(rec.get("log") or [])
+        return out
+
+
+def claim_completion_notify(coder_run_id: str) -> Optional[Dict[str, Any]]:
+    """완료 알림 1회 권한을 원자적으로 claim.
+
+    이 호출이 claim에 성공하면(오케스트레이션 런 + 미알림) ``notified`` 플래그를
+    세팅하고 스냅샷 dict를 반환한다 → 동시/중복 완료가 정확히 1회만 주입되도록 보장.
+    그 외(라우팅 없음 / 이미 알림)는 None.
+    """
+    with _CODER_RUN_LOCK:
+        rec = _CODER_RUN_REGISTRY.get(coder_run_id)
+        if rec is None or rec.get("main_source") is None:
+            return None
+        if rec.get("notified"):
+            return None
+        rec["notified"] = True
+        return {
+            "goal": rec.get("goal"),
+            "status": rec.get("status"),
+            "result": rec.get("result"),
+            "error": rec.get("error"),
+            "source": rec.get("main_source"),
+            "loop": rec.get("main_loop"),
+            "log": list(rec.get("log") or []),
+        }
+
+
 # Bang-prefixed control tokens. A bare ``cancel`` is rejected by
 # ``is_cancel_command`` because such a word can legitimately appear in a
 # follow-up instruction; the prefix marks an explicit gateway command.

@@ -282,6 +282,13 @@ def _build_coder_spawn_callback(runner, source, session_key, run_generation, loo
         return runner._is_session_run_current(session_key, run_generation)
 
     def _coder_spawn(coder_run_id: str, goal: str) -> None:
+        # 라우팅 메타데이터를 먼저 기록 — 스레드 생성 가드와 무관하게 완료 웨이크가
+        # 동작하도록(메인 세션 source/loop는 이 클로저에 이미 캡처됨).
+        try:
+            from .delegate_background import record_main_routing
+            record_main_routing(coder_run_id, source, loop)
+        except Exception:
+            logger.debug("record_main_routing failed", exc_info=True)
         if not status_adapter or not _run_still_current():
             return
         if not hasattr(status_adapter, "create_coder_thread"):
