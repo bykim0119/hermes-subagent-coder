@@ -114,3 +114,34 @@ def test_coder_status_unknown_or_code_run_errors():
     db._register_coder_run("coder-slash", "slash:/code:1", "gs")
     assert "error" in orch.coder_status("coder-slash")   # /code 제외
     assert "error" in orch.coder_status("nope")          # 미존재
+
+
+def test_cancel_coder_wraps_cancel_run(monkeypatch):
+    db._register_coder_run("coder-c", "parent", "gc")
+    db.record_main_routing("coder-c", _src(), loop="LOOP")
+
+    called = {}
+
+    def fake_cancel(cid):
+        called["cid"] = cid
+        return True
+
+    monkeypatch.setattr(orch, "cancel_coder_run", fake_cancel)
+    out = orch.cancel_coder("coder-c")
+    assert out == {"cancelled": True}
+    assert called["cid"] == "coder-c"
+
+
+def test_cancel_coder_rejects_code_run(monkeypatch):
+    db._register_coder_run("coder-slash", "slash:/code:1", "gs")
+    fired = {"n": 0}
+    monkeypatch.setattr(
+        orch, "cancel_coder_run", lambda cid: fired.__setitem__("n", fired["n"] + 1)
+    )
+    out = orch.cancel_coder("coder-slash")
+    assert "error" in out
+    assert fired["n"] == 0   # /code 런엔 cancel_coder_run 호출 안 함
+
+
+def test_cancel_coder_missing_id():
+    assert "error" in orch.cancel_coder("")

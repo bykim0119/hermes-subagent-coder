@@ -15,6 +15,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .delegate_background import (
+    cancel_coder_run,
     get_orchestration_run,
     list_orchestration_runs,
 )
@@ -67,3 +68,18 @@ def coder_status(
         "available": max(mx - active, 0),
         "runs": runs,
     }
+
+
+def cancel_coder(coder_run_id: str) -> Dict[str, Any]:
+    """오케스트레이션 코더를 프로그래밍적으로 취소(기존 cancel_coder_run 래핑).
+
+    오케스트레이션 대상에만 적용한다. /code 슬래시 코더는 라우팅이 없어 거부되며
+    기존 사람 경로(Discord ``!cancel``)로만 취소된다.
+    """
+    if not coder_run_id:
+        return {"error": "coder_run_id required"}
+    if get_orchestration_run(coder_run_id) is None:
+        return {
+            "error": f"코더 '{coder_run_id}'는 오케스트레이션 대상이 아니거나 없음"
+        }
+    return {"cancelled": bool(cancel_coder_run(coder_run_id))}
