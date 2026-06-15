@@ -17,6 +17,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
@@ -62,6 +63,8 @@ _dispatch_parent_agent: ContextVar[Optional[Any]] = ContextVar(
 _CODER_RUN_REGISTRY: Dict[str, Dict[str, Any]] = {}
 _CODER_RUN_LOCK = threading.Lock()
 
+_LOG_MAXLEN = 200  # bounded coder NDJSON event tail per run
+
 
 def _register_coder_run(coder_run_id: str, parent_task_id: str, goal: str) -> None:
     with _CODER_RUN_LOCK:
@@ -70,6 +73,7 @@ def _register_coder_run(coder_run_id: str, parent_task_id: str, goal: str) -> No
             "goal": goal,
             "started_at": time.time(),
             "status": "running",
+            "log": deque(maxlen=_LOG_MAXLEN),
         }
 
 
@@ -148,6 +152,13 @@ def _build_coder_progress_sink(coder_run_id: str):
                 sessions = get_global_sessions()
                 if tid and sessions is not None:
                     sessions.set_codex_session_id(coder_run_id, tid)
+            try:
+                with _CODER_RUN_LOCK:
+                    rec = _CODER_RUN_REGISTRY.get(coder_run_id)
+                    if rec is not None and rec.get("log") is not None:
+                        rec["log"].append({"event": event.event, "data": event.data})
+            except Exception:
+                logger.debug("coder log capture failed", exc_info=True)
             from . import coder_event_bus
             payload = {"event": event.event, "data": event.data}
             coder_event_bus.dispatch(coder_run_id, payload)
