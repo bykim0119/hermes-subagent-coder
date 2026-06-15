@@ -522,7 +522,8 @@ def _install_discord_coder_overlay() -> None:
     # entirely. The launch command (`hermes gateway run`) is the reliable
     # signal, so also consult sys.argv.
     _gateway_mode = (
-        "gateway.platforms.discord" in sys.modules
+        "plugins.platforms.discord.adapter" in sys.modules  # hermes >=0.16
+        or "gateway.platforms.discord" in sys.modules  # hermes <0.16
         or "gateway.run" in sys.modules
         or "gateway" in sys.argv
     )

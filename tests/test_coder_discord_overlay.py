@@ -20,6 +20,31 @@ from subagent_coder import _install_discord_coder_overlay
 from subagent_coder import discord_overlay
 
 
+def _is_adapter_module(name):
+    return (
+        name.endswith("discord_platform.adapter")
+        or name.endswith("platforms.discord.adapter")
+        or name == "gateway.platforms.discord"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_discord_adapter_modules():
+    """Strip any real/leaked Discord adapter modules from sys.modules so the
+    resolver only sees the fake each test installs.
+
+    Other test files run ``discover_plugins`` which loads the bundled adapter as
+    ``hermes_plugins.discord_platform.adapter``; left in sys.modules it would be
+    picked over a test's ``gateway.platforms.discord`` fake (cross-file pollution).
+    """
+    saved = {n: sys.modules[n] for n in list(sys.modules) if _is_adapter_module(n)}
+    for n in saved:
+        del sys.modules[n]
+    yield
+    for n, m in saved.items():
+        sys.modules[n] = m
+
+
 _CODER_METHODS = (
     "_make_thread_name",
     "_publish_to_thread",
@@ -116,6 +141,50 @@ def test_overlay_attaches_coder_methods(monkeypatch):
     for name in _CODER_METHODS:
         assert callable(getattr(cls, name, None)), f"{name} not attached"
     assert getattr(cls, "_subagent_coder_overlay_installed", False) is True
+
+
+def test_overlay_install_via_hermes_016_module_path(monkeypatch):
+    """hermes >=0.16 moved Discord to ``plugins.platforms.discord.adapter``.
+
+    The overlay must find ``DiscordAdapter`` at the new path (and the legacy
+    ``gateway.platforms.discord`` must be absent for this to be meaningful).
+    """
+    monkeypatch.delitem(sys.modules, "gateway.platforms.discord", raising=False)
+    cls = _make_stub_adapter_cls()
+    fake_mod = types.ModuleType("plugins.platforms.discord.adapter")
+    fake_mod.DiscordAdapter = cls
+    monkeypatch.setitem(sys.modules, "plugins.platforms.discord.adapter", fake_mod)
+    discord_overlay.install_discord_coder_overlay()
+    for name in _CODER_METHODS:
+        assert callable(getattr(cls, name, None)), f"{name} not attached (0.16 path)"
+    assert getattr(cls, "_subagent_coder_overlay_installed", False) is True
+
+
+def test_overlay_wraps_plugin_namespaced_live_adapter(monkeypatch):
+    """hermes >=0.16 loads the bundled Discord platform as a plugin, so the
+    *live* adapter class lives in ``hermes_plugins.discord_platform.adapter`` —
+    not the on-disk ``plugins.platforms.discord.adapter`` (importing that path
+    yields a second, unused class). The overlay must wrap the plugin-namespaced
+    live class, otherwise /code + coder routing never reach the running adapter.
+    """
+    monkeypatch.delitem(sys.modules, "gateway.platforms.discord", raising=False)
+    live_cls = _make_stub_adapter_cls()   # the one the gateway instantiates
+    dead_cls = _make_stub_adapter_cls()   # on-disk import — must stay untouched
+
+    live_mod = types.ModuleType("hermes_plugins.discord_platform.adapter")
+    live_mod.DiscordAdapter = live_cls
+    dead_mod = types.ModuleType("plugins.platforms.discord.adapter")
+    dead_mod.DiscordAdapter = dead_cls
+    monkeypatch.setitem(sys.modules, "hermes_plugins.discord_platform.adapter", live_mod)
+    monkeypatch.setitem(sys.modules, "plugins.platforms.discord.adapter", dead_mod)
+
+    discord_overlay.install_discord_coder_overlay()
+
+    assert getattr(live_cls, "_subagent_coder_overlay_installed", False) is True, \
+        "live (plugin-namespaced) adapter was not wrapped"
+    assert callable(getattr(live_cls, "create_coder_thread", None))
+    assert getattr(dead_cls, "_subagent_coder_overlay_installed", False) is False, \
+        "on-disk adapter should be left untouched"
 
 
 def test_overlay_idempotent(monkeypatch):
