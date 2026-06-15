@@ -20,11 +20,15 @@ is a no-op in CLI mode.
 """
 from __future__ import annotations
 
+import importlib
 import logging
 import sys
 from typing import Any, Optional
 
-import discord
+try:
+    import discord
+except ImportError:  # discord is an optional platform extra in hermes >=0.16
+    discord = None  # type: ignore[assignment]
 
 from .coder_progress_formatter import format_event as _format_coder_event
 
@@ -114,7 +118,13 @@ async def create_coder_thread(
             await channel.send(f"⚠️ {exc}")
             return
         try:
-            self._threads.mark_participated(str(thread.id))
+            # ThreadParticipationTracker.mark_participated was renamed to mark
+            # in hermes 0.16; support both for cross-version portability.
+            _mark = getattr(self._threads, "mark", None) or getattr(
+                self._threads, "mark_participated", None
+            )
+            if _mark is not None:
+                _mark(str(thread.id))
         except Exception:
             pass
     except Exception as exc:
@@ -441,6 +451,64 @@ def _add_code_command(self) -> None:
 # Install: setattr helper methods + wrap stock methods + late retrofit.
 # ----------------------------------------------------------------------
 
+def _resolve_live_discord_adapter():
+    """Return the ``DiscordAdapter`` class the gateway actually instantiates.
+
+    The module that holds it moved across hermes versions, and — crucially —
+    hermes >=0.16 ships Discord as a *bundled platform plugin*, so the gateway
+    loads it under the plugin namespace ``hermes_plugins.discord_platform.adapter``
+    rather than the on-disk ``plugins.platforms.discord.adapter``. Importing the
+    on-disk path creates a *second, unused* class object; wrapping that one
+    leaves the live adapter untouched. So we must wrap the class from the module
+    the gateway already imported.
+
+    Strategy: prefer an already-loaded adapter module (that is the live one,
+    since the bundled discord platform loads before this user plugin during
+    discovery), choosing the plugin-namespaced module first; only fall back to
+    importing known locations if nothing is loaded yet.
+    """
+    loaded = {
+        name: mod
+        for name, mod in list(sys.modules.items())
+        if mod is not None
+        and getattr(mod, "DiscordAdapter", None) is not None
+        and (
+            name.endswith("discord_platform.adapter")  # hermes >=0.16 plugin load
+            or name.endswith("platforms.discord.adapter")
+            or name == "gateway.platforms.discord"  # hermes <0.16
+        )
+    }
+    # Priority: the plugin-loaded module is the live one the gateway uses.
+    for pred in (
+        lambda n: n.startswith("hermes_plugins.") and n.endswith("discord_platform.adapter"),
+        lambda n: n.endswith("discord_platform.adapter"),
+        lambda n: n.endswith("platforms.discord.adapter"),
+        lambda n: n == "gateway.platforms.discord",
+    ):
+        for name in loaded:
+            if pred(name):
+                return getattr(loaded[name], "DiscordAdapter")
+
+    # Nothing imported yet — import known locations (gateway mode, pre-adapter).
+    # Deliberately NOT importing the on-disk ``plugins.platforms.discord.adapter``
+    # here: hermes >=0.16 loads it under the plugin namespace, and importing the
+    # on-disk path would create a duplicate, unused class (the bug this resolver
+    # exists to avoid). If something already loaded that path, the scan above
+    # picks it up; we just never import it ourselves.
+    for name in (
+        "hermes_plugins.discord_platform.adapter",  # hermes >=0.16
+        "gateway.platforms.discord",  # hermes <0.16
+    ):
+        try:
+            mod = importlib.import_module(name)
+        except Exception:
+            continue
+        cls = getattr(mod, "DiscordAdapter", None)
+        if cls is not None:
+            return cls
+    return None
+
+
 def install_discord_coder_overlay() -> None:
     """Attach coder methods + wraps onto ``DiscordAdapter`` (gateway mode only).
 
@@ -450,21 +518,11 @@ def install_discord_coder_overlay() -> None:
     discovers plugins lazily on the first turn), so after installing the class
     wraps we also retrofit any live, already-connected adapter instance.
     """
-    disc = sys.modules.get("gateway.platforms.discord")
-    if disc is None:
-        # Gateway mode but the platform module isn't imported yet (discovery ran
-        # before _create_adapter). Import it now so the class exists to wrap
-        # *before* the adapter is created — otherwise the wraps would be missed.
-        try:
-            import gateway.platforms.discord as disc  # noqa: F811
-        except Exception:
-            logger.debug(
-                "subagent_coder: gateway.platforms.discord unavailable — skipping Discord overlay"
-            )
-            return
-    DiscordAdapter = getattr(disc, "DiscordAdapter", None)
+    DiscordAdapter = _resolve_live_discord_adapter()
     if DiscordAdapter is None:
-        logger.debug("subagent_coder: DiscordAdapter not found — skipping Discord overlay")
+        logger.debug(
+            "subagent_coder: Discord adapter class unavailable — skipping Discord overlay"
+        )
         return
     if getattr(DiscordAdapter, "_subagent_coder_overlay_installed", False):
         _retrofit_live_discord_adapter()  # discovery may re-run; ensure live wiring
