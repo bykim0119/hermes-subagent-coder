@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from subagent_coder import coder_orchestration as orch
 from subagent_coder import delegate_background as db
 
 
@@ -66,3 +67,50 @@ def test_get_orchestration_run_include_result_and_log():
     bare = db.get_orchestration_run("coder-d")
     assert "result" not in bare
     assert "log" not in bare
+
+
+def test_coder_status_summary_lists_capacity(monkeypatch):
+    monkeypatch.setattr(orch, "_max_concurrent", lambda: 3)
+    db._register_coder_run("coder-a", "parent", "ga")
+    db.record_main_routing("coder-a", _src(), loop="LOOP")
+    db._register_coder_run("coder-b", "parent", "gb")
+    db.record_main_routing("coder-b", _src(), loop="LOOP")
+    db._CODER_RUN_REGISTRY["coder-b"]["status"] = "completed"
+    # /code 런은 카운트/목록 제외
+    db._register_coder_run("coder-slash", "slash:/code:1", "gs")
+
+    out = orch.coder_status()
+    assert out["active"] == 1          # running 인 오케스트레이션 런만
+    assert out["max"] == 3
+    assert out["available"] == 2
+    assert {r["coder_run_id"] for r in out["runs"]} == {"coder-a", "coder-b"}
+
+
+def test_coder_status_detail_with_include():
+    db._register_coder_run("coder-d", "parent", "gd")
+    db.record_main_routing("coder-d", _src(), loop="LOOP")
+    rec = db._CODER_RUN_REGISTRY["coder-d"]
+    rec["status"] = "completed"
+    rec["result"] = "done!"
+
+    out = orch.coder_status("coder-d", include=["result"])
+    assert out["coder_run_id"] == "coder-d"
+    assert out["result"] == "done!"
+
+
+def test_coder_status_detail_log_tail_capped():
+    db._register_coder_run("coder-d", "parent", "gd")
+    db.record_main_routing("coder-d", _src(), loop="LOOP")
+    rec = db._CODER_RUN_REGISTRY["coder-d"]
+    for i in range(orch._LOG_TAIL + 5):
+        rec["log"].append({"event": "e", "data": {"i": i}})
+
+    out = orch.coder_status("coder-d", include=["log"])
+    assert len(out["log"]) == orch._LOG_TAIL           # tail로 잘림
+    assert out["log"][-1]["data"]["i"] == orch._LOG_TAIL + 4
+
+
+def test_coder_status_unknown_or_code_run_errors():
+    db._register_coder_run("coder-slash", "slash:/code:1", "gs")
+    assert "error" in orch.coder_status("coder-slash")   # /code 제외
+    assert "error" in orch.coder_status("nope")          # 미존재
