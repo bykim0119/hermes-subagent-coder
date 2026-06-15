@@ -12,10 +12,12 @@ agent-spawn된 코더("오케스트레이션 런")에 대한 메인 에이전트
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Any, Dict, List, Optional
 
 from .delegate_background import (
     cancel_coder_run,
+    claim_completion_notify,
     get_orchestration_run,
     list_orchestration_runs,
 )
@@ -83,3 +85,89 @@ def cancel_coder(coder_run_id: str) -> Dict[str, Any]:
             "error": f"코더 '{coder_run_id}'는 오케스트레이션 대상이 아니거나 없음"
         }
     return {"cancelled": bool(cancel_coder_run(coder_run_id))}
+
+
+def _format_log_line(evt: Dict[str, Any]) -> str:
+    name = evt.get("event")
+    data = evt.get("data")
+    return f"{name}: {data}" if data else str(name)
+
+
+def _build_completion_text(coder_run_id: str, snap: Dict[str, Any]) -> str:
+    goal = snap.get("goal")
+    status = snap.get("status")
+    if status == "cancelled":
+        return f"[코더 {coder_run_id} 취소됨] 작업:{goal}"
+    if status == "failed":
+        tail = "\n".join(
+            _format_log_line(e) for e in (snap.get("log") or [])[-_LOG_TAIL:]
+        )
+        return (
+            f"[코더 {coder_run_id} 실패] 작업:{goal} 에러:{snap.get('error')}\n"
+            f"최근 로그:\n{tail}"
+        )
+    return f"[코더 {coder_run_id} 완료] 작업:{goal}\n결과:{snap.get('result')}"
+
+
+def _resolve_adapter(source):
+    """gateway.run._gateway_runner_ref 브리지로 source.platform의 live 어댑터를 해석."""
+    gw = sys.modules.get("gateway.run")
+    ref = getattr(gw, "_gateway_runner_ref", None) if gw is not None else None
+    runner = ref() if callable(ref) else None
+    if runner is None:
+        return None
+    adapters = getattr(runner, "adapters", {})
+    plat = getattr(source, "platform", None)
+    adapter = adapters.get(plat)
+    if adapter is None:
+        pv = getattr(plat, "value", plat)
+        for p, a in adapters.items():
+            if getattr(p, "value", p) == pv:
+                adapter = a
+                break
+    return adapter
+
+
+def notify_main_on_completion(coder_run_id: str) -> None:
+    """오케스트레이션 코더 완료 시 메인 세션에 synthetic 내부 MessageEvent 주입.
+
+    stock 백그라운드-프로세스 완료 알림(gateway/run.py)의 정확한 미러:
+    MessageEvent(internal=True) + adapter.handle_message. claim_completion_notify로
+    완료당 1회만 주입한다. 코더 데몬 스레드에서 호출되므로 게이트웨이 루프에
+    run_coroutine_threadsafe로 스케줄한다.
+    """
+    snap = claim_completion_notify(coder_run_id)
+    if snap is None:
+        return  # 오케스트레이션 대상 아님 또는 이미 알림
+    source = snap.get("source")
+    loop = snap.get("loop")
+    if source is None or loop is None:
+        logger.warning("코더 %s 완료 — 라우팅/루프 분실, 알림 drop", coder_run_id)
+        return
+    adapter = _resolve_adapter(source)
+    if adapter is None:
+        logger.warning(
+            "코더 %s 완료 — adapter 분실, 알림 drop (결과는 coder_status로 조회 가능)",
+            coder_run_id,
+        )
+        return
+    text = _build_completion_text(coder_run_id, snap)
+    try:
+        import asyncio
+
+        from gateway.platforms.base import MessageEvent, MessageType
+
+        synth = MessageEvent(
+            text=text,
+            message_type=MessageType.TEXT,
+            source=source,
+            internal=True,
+        )
+        asyncio.run_coroutine_threadsafe(adapter.handle_message(synth), loop)
+        logger.info(
+            "코더 %s 완료 — 메인 깨우기 주입 (status=%s)",
+            coder_run_id,
+            snap.get("status"),
+        )
+    except Exception:
+        logger.exception("코더 %s 완료 알림 주입 실패", coder_run_id)

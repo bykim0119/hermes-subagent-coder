@@ -294,19 +294,24 @@ def _spawn_detached_coder(
             )
             with _CODER_RUN_LOCK:
                 rec = _CODER_RUN_REGISTRY.get(coder_run_id)
-                if rec is not None:
+                if rec is not None and rec.get("status") != "cancelled":
                     rec["status"] = "completed"
                     rec["result"] = result
         except Exception as exc:
             logger.exception("Coder run %s failed: %s", coder_run_id, exc)
             with _CODER_RUN_LOCK:
                 rec = _CODER_RUN_REGISTRY.get(coder_run_id)
-                if rec is not None:
+                if rec is not None and rec.get("status") != "cancelled":
                     rec["status"] = "failed"
                     rec["error"] = str(exc)
         finally:
             _coder_child_ctx.reset(token)
             unregister_coder_sink(coder_run_id)
+            try:
+                from . import coder_orchestration
+                coder_orchestration.notify_main_on_completion(coder_run_id)
+            except Exception:
+                logger.debug("completion notify failed", exc_info=True)
 
     thread = threading.Thread(
         target=_runner, name=f"coder-{coder_run_id}", daemon=True
