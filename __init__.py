@@ -54,6 +54,9 @@ def register(ctx) -> None:
     _install_coder_spawn_callback_slot()
     _install_gateway_coder_spawn_wraps()
     _install_coder_toolset_membership()
+    from . import coder_orchestration
+    coder_orchestration.register_orchestration_tools()
+    coder_orchestration.install_orchestration_toolset_membership()
     _install_discord_coder_overlay()
     logger.info(
         "subagent_coder: register(ctx) complete "
@@ -282,6 +285,13 @@ def _build_coder_spawn_callback(runner, source, session_key, run_generation, loo
         return runner._is_session_run_current(session_key, run_generation)
 
     def _coder_spawn(coder_run_id: str, goal: str) -> None:
+        # 라우팅 메타데이터를 먼저 기록 — 스레드 생성 가드와 무관하게 완료 웨이크가
+        # 동작하도록(메인 세션 source/loop는 이 클로저에 이미 캡처됨).
+        try:
+            from .delegate_background import record_main_routing
+            record_main_routing(coder_run_id, source, loop)
+        except Exception:
+            logger.debug("record_main_routing failed", exc_info=True)
         if not status_adapter or not _run_still_current():
             return
         if not hasattr(status_adapter, "create_coder_thread"):

@@ -17,6 +17,16 @@ def test_added_to_core_and_delegation():
     assert "delegate_task_background" in resolve_toolset("delegation")
 
 
+def test_orchestration_tools_added():
+    from subagent_coder import coder_orchestration
+    coder_orchestration.register_orchestration_tools()
+    coder_orchestration.install_orchestration_toolset_membership()
+    for name in ("coder_status", "cancel_coder"):
+        assert name in toolsets._HERMES_CORE_TOOLS
+        assert name in resolve_toolset("delegation")
+        assert name in resolve_toolset("hermes-discord")
+
+
 def test_by_reference_toolset_gets_it():
     """_HERMES_CORE_TOOLS를 참조로 쓰는 toolset (in-place mutation)."""
     _install_coder_toolset_membership()
