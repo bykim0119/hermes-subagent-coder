@@ -77,3 +77,8 @@ def test_spawn_reviewer_reasoning_path_with_pii_toolset():
     assert captured["toolsets"] == ["file", "pii"]
     assert "리뷰어" in captured["goal"]                    # 안내문 prepend
     db._CODER_RUN_REGISTRY.clear()
+
+
+def test_schema_role_enum_has_four_roles():
+    enum = db.DELEGATE_TASK_BACKGROUND_SCHEMA["properties"]["role"]["enum"]
+    assert set(enum) == {"coder", "planner", "tester", "reviewer"}

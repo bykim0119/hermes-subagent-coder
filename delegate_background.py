@@ -606,12 +606,14 @@ DELEGATE_TASK_BACKGROUND_SCHEMA = {
         },
         "role": {
             "type": "string",
-            "enum": ["coder", "planner"],
+            "enum": ["coder", "planner", "tester", "reviewer"],
             "description": (
                 "위임할 역할을 이 인자로 반드시 지정하라(goal 문장에 적지 말 것). "
                 "'coder'=범위가 분명한 구현·수정(기본). "
-                "'planner'=크거나 익숙지 않아 먼저 조사·구현계획서가 필요한 작업 "
-                "(계획서를 문서로 작성해 돌려줌). 미지정 시 coder."
+                "'planner'=먼저 조사·구현계획서가 필요한 작업. "
+                "'tester'=구현된 코드의 테스트 작성·실행 검증. "
+                "'reviewer'=결과물 품질 리뷰 + 공개·제출 직전 개인정보 점검. "
+                "미지정 시 coder."
             ),
         },
     },
