@@ -57,6 +57,9 @@ def register(ctx) -> None:
     from . import coder_orchestration
     coder_orchestration.register_orchestration_tools()
     coder_orchestration.install_orchestration_toolset_membership()
+    from . import scan_pii_tool
+    scan_pii_tool.register_scan_pii_tool()
+    scan_pii_tool.install_pii_toolset()
     _install_discord_coder_overlay()
     logger.info(
         "subagent_coder: register(ctx) complete "
