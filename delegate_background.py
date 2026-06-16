@@ -607,7 +607,8 @@ DELEGATE_TASK_BACKGROUND_SCHEMA = {
             "type": "string",
             "enum": ["coder", "planner"],
             "description": (
-                "위임할 역할. 'coder'=범위가 분명한 구현·수정(기본). "
+                "위임할 역할을 이 인자로 반드시 지정하라(goal 문장에 적지 말 것). "
+                "'coder'=범위가 분명한 구현·수정(기본). "
                 "'planner'=크거나 익숙지 않아 먼저 조사·구현계획서가 필요한 작업 "
                 "(계획서를 문서로 작성해 돌려줌). 미지정 시 coder."
             ),
@@ -635,9 +636,13 @@ def register_delegate_task_background() -> None:
         toolset="delegation",
         schema=DELEGATE_TASK_BACKGROUND_SCHEMA,
         description=(
-            "코딩 작업을 코더 서브에이전트에게 백그라운드로 위임한다. 즉시 반환하며, "
-            "코더는 별도로 실행되다 끝나면 자동으로 결과 알림이 도착한다. 독립 작업은 "
-            "한 턴에 여러 번 호출해 병렬로 돌려라. 위임 후에는 이 턴을 종료하라 — "
+            "작업을 역할별 서브에이전트에게 백그라운드로 위임한다. 즉시 반환하며, "
+            "서브에이전트가 끝나면 자동으로 결과 알림이 도착한다. "
+            "역할은 반드시 `role` 인자로 고른다 — 'coder'(범위가 분명한 구현·수정, 기본) "
+            "또는 'planner'(먼저 조사·설계해 구현계획서를 문서로 작성). "
+            "주의: 역할을 goal 문장에 적지 마라('planner처럼 해줘' 같은 식 금지). "
+            "planner를 원하면 goal에는 무엇을 설계할지만 적고 role='planner'로 지정하라. "
+            "독립 작업은 한 턴에 여러 번 호출해 병렬로 돌려라. 위임 후에는 이 턴을 종료하라 — "
             "완료를 기다리려 coder_status를 폴링하지 마라(완료는 자동 통지된다)."
         ),
         handler=lambda args, **kw: json.dumps(
