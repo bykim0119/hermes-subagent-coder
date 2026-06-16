@@ -100,7 +100,15 @@ async def create_coder_thread(
                     self.name, target_id,
                 )
                 return
-        anchor = await channel.send(f"▶ 코더에게 위임 — `{coder_run_id}`")
+        # 역할 라벨(코더/플래너/…)은 레지스트리에 기록된 run의 role로 해석한다.
+        # spawn 콜백은 _register_coder_run 이후 발화하므로 이 시점에 role이 있다.
+        from . import delegate_background as _db
+        from .coder_roles import get_role
+        _rec = _db.get_coder_run(coder_run_id)
+        _label = get_role(_rec.get("role") if _rec else None).result_label
+        anchor = await channel.send(
+            f"▶ 서브에이전트에게 위임 · {_label} — `{coder_run_id}`"
+        )
         thread_name = self._make_thread_name(goal)
         thread = await anchor.create_thread(
             name=thread_name,
@@ -205,7 +213,7 @@ async def _handle_code_slash(
 
     import uuid as _uuid
 
-    coder_run_id = f"coder-{_uuid.uuid4().hex[:8]}"
+    coder_run_id = f"agent-{_uuid.uuid4().hex[:8]}"
     parent_task_id = f"slash:/code:{interaction.user.id}"
 
     try:

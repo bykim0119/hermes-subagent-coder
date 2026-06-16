@@ -552,7 +552,7 @@ def delegate_task_background(
                 "role": role_config.name,
             }
 
-    coder_run_id = f"coder-{_uuid.uuid4().hex[:8]}"
+    coder_run_id = f"agent-{_uuid.uuid4().hex[:8]}"
     parent_task_id = (
         getattr(parent_agent, "task_id", None)
         or getattr(parent_agent, "_subagent_id", None)

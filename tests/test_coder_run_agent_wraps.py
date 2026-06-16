@@ -65,7 +65,7 @@ def test_registry_handler_falls_back_to_contextvar(monkeypatch):
 
     result = json.loads(raw)
     assert result["status"] == "spawned"
-    assert result["coder_run_id"].startswith("coder-")
+    assert result["coder_run_id"].startswith("agent-")
     # parent_agent이 ContextVar로 주입돼 spawn까지 도달
     assert mock_spawn.called
     assert mock_spawn.call_args.kwargs["parent_agent"] is agent

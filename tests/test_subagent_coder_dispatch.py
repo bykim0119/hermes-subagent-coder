@@ -26,7 +26,7 @@ def test_register_wraps_invoke_tool_and_injects_parent_agent():
 
     # parent_agent=self(agent)가 주입돼 정상 spawn + callback 발화
     assert result["status"] == "spawned"
-    assert result["coder_run_id"].startswith("coder-")
+    assert result["coder_run_id"].startswith("agent-")
     agent.coder_spawn_callback.assert_called_once()
 
 
