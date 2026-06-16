@@ -156,3 +156,30 @@ def test_wake_skips_code_run(monkeypatch):
         orch.notify_main_on_completion("coder-slash")
 
     assert not sched.called   # 라우팅 없음 → claim None → no-op
+
+
+def test_wake_planner_label_and_suffix(monkeypatch):
+    adapter = MagicMock()
+    _install_fake_gateway(monkeypatch, adapter)
+    rec, _ = _seed_orch("coder-pp", "completed", result="plan at docs/x.md")
+    rec["role"] = "planner"
+
+    with patch("asyncio.run_coroutine_threadsafe"):
+        orch.notify_main_on_completion("coder-pp")
+
+    synth = adapter.handle_message.call_args.args[0]
+    assert "플래너" in synth.text           # 역할 라벨
+    assert "보스에게 보여주고" in synth.text  # planner 접미 지시
+    assert "plan at docs/x.md" in synth.text
+
+
+def test_wake_coder_label_default(monkeypatch):
+    adapter = MagicMock()
+    _install_fake_gateway(monkeypatch, adapter)
+    _seed_orch("coder-cc", "completed", result="built")   # role 기본 coder
+
+    with patch("asyncio.run_coroutine_threadsafe"):
+        orch.notify_main_on_completion("coder-cc")
+
+    synth = adapter.handle_message.call_args.args[0]
+    assert "코더" in synth.text

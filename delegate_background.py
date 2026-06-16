@@ -179,6 +179,7 @@ def claim_completion_notify(coder_run_id: str) -> Optional[Dict[str, Any]]:
             "source": rec.get("main_source"),
             "loop": rec.get("main_loop"),
             "log": list(rec.get("log") or []),
+            "role": rec.get("role", "coder"),
         }
 
 
