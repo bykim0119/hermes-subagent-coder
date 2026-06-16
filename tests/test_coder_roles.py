@@ -1,5 +1,8 @@
 """역할 fleet — 역할표 + 분기 + Planner 스폰 설정 검증."""
+from unittest.mock import MagicMock, patch
+
 from subagent_coder import coder_roles as cr
+from subagent_coder import delegate_background as db
 
 
 def test_registry_has_coder_and_planner():
@@ -26,3 +29,61 @@ def test_planner_role_is_reasoning_model_no_terminal():
 def test_get_role_defaults_and_fallback():
     assert cr.get_role(None).name == "coder"          # 미지정 → coder
     assert cr.get_role("nonsense").name == "coder"    # 미지의 → coder 폴백
+
+
+def test_register_stores_role():
+    db._CODER_RUN_REGISTRY.clear()
+    db._register_coder_run("r1", "parent", "g", role="planner")
+    assert db._CODER_RUN_REGISTRY["r1"]["role"] == "planner"
+    db._CODER_RUN_REGISTRY.clear()
+
+
+def test_spawn_coder_uses_codex_path():
+    """coder 역할: _coder_child_ctx에 codex provider 세팅 + terminal/file 툴셋."""
+    db._CODER_RUN_REGISTRY.clear()
+    db._register_coder_run("rc", "parent", "g", role="coder")
+    captured = {}
+
+    def fake_delegate_task(**kwargs):
+        captured.update(kwargs)
+        captured["ctx"] = db._coder_child_ctx.get()
+        return "coder-done"
+
+    with patch("tools.delegate_tool.delegate_task", fake_delegate_task), \
+         patch("subagent_coder.codex_exec_client.register_coder_sink"), \
+         patch("subagent_coder.codex_exec_client.unregister_coder_sink"), \
+         patch("subagent_coder.coder_orchestration.notify_main_on_completion"):
+        from subagent_coder.coder_roles import get_role
+        db._spawn_detached_coder(MagicMock(), "g", "", "rc", get_role("coder"))
+        import time; time.sleep(0.2)
+
+    assert captured["toolsets"] == ["terminal", "file"]
+    assert captured["ctx"]["provider"] == "codex-exec"   # codex override 적용
+    assert captured["goal"] == "g"                        # 안내문 prefix 없음
+    db._CODER_RUN_REGISTRY.clear()
+
+
+def test_spawn_planner_uses_reasoning_path():
+    """planner 역할: codex ctx 없음, file 툴셋, goal 앞에 설계자 안내문."""
+    db._CODER_RUN_REGISTRY.clear()
+    db._register_coder_run("rp", "parent", "그 기능 설계해", role="planner")
+    captured = {}
+
+    def fake_delegate_task(**kwargs):
+        captured.update(kwargs)
+        captured["ctx"] = db._coder_child_ctx.get()
+        return "plan at docs/.../x.md"
+
+    with patch("tools.delegate_tool.delegate_task", fake_delegate_task), \
+         patch("subagent_coder.codex_exec_client.register_coder_sink"), \
+         patch("subagent_coder.codex_exec_client.unregister_coder_sink"), \
+         patch("subagent_coder.coder_orchestration.notify_main_on_completion"):
+        from subagent_coder.coder_roles import get_role
+        db._spawn_detached_coder(MagicMock(), "그 기능 설계해", "", "rp", get_role("planner"))
+        import time; time.sleep(0.2)
+
+    assert captured["toolsets"] == ["file"]
+    assert captured["ctx"] is None                        # codex override 없음 → 메인 모델
+    assert "설계자" in captured["goal"]                    # 안내문 prefix 주입
+    assert "그 기능 설계해" in captured["goal"]            # 원 목표 포함
+    db._CODER_RUN_REGISTRY.clear()

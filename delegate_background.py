@@ -76,13 +76,16 @@ YIELD_NOTE = (
 )
 
 
-def _register_coder_run(coder_run_id: str, parent_task_id: str, goal: str) -> None:
+def _register_coder_run(
+    coder_run_id: str, parent_task_id: str, goal: str, role: str = "coder"
+) -> None:
     with _CODER_RUN_LOCK:
         _CODER_RUN_REGISTRY[coder_run_id] = {
             "parent_task_id": parent_task_id,
             "goal": goal,
             "started_at": time.time(),
             "status": "running",
+            "role": role,
             "log": deque(maxlen=_LOG_MAXLEN),
         }
 
@@ -267,17 +270,17 @@ def _spawn_detached_coder(
     goal: str,
     context: str,
     coder_run_id: str,
-    provider: str = "codex-exec",
+    role_config,
 ) -> str:
-    """Run the coder child in a background daemon thread.
+    """역할 설정에 따라 자식 에이전트를 백그라운드 데몬 스레드로 띄운다.
 
-    Returns immediately with the coder_run_id. The child runs the STOCK
-    ``delegate_task``; the ``_coder_child_ctx`` ContextVar (set here) drives the
-    register(ctx) wraps that inject ``override_provider``/``override_api_mode``
-    and pin ``child._subagent_id`` to ``coder_run_id`` so gateway can route its
-    progress events to the matching Discord thread.
+    coder(provider=codex-exec): 기존 codex 경로 — _coder_child_ctx로 provider/
+    api_mode override + subagent_id 핀. planner 등(provider=None): codex override
+    없이 메인 모델을 상속하고, 역할 안내문을 goal 앞에 주입한 뒤 stock delegate_task를
+    역할의 toolsets로 호출한다. 등록·완료 웨이크 배관은 양쪽 공통.
     """
     sink = _build_coder_progress_sink(coder_run_id)
+    use_codex = role_config.provider == "codex-exec"
 
     def _runner() -> None:
         # Imported lazily — codex_exec_client lives in this package and the
@@ -286,20 +289,29 @@ def _spawn_detached_coder(
         from tools.delegate_tool import delegate_task
 
         register_coder_sink(coder_run_id, sink)
-        token = _coder_child_ctx.set(
-            {
-                "subagent_id": coder_run_id,
-                "provider": provider,
-                "api_mode": "chat_completions",
-            }
-        )
+        token = None
+        if use_codex:
+            token = _coder_child_ctx.set(
+                {
+                    "subagent_id": coder_run_id,
+                    "provider": "codex-exec",
+                    "api_mode": "chat_completions",
+                }
+            )
+            effective_goal = goal
+        else:
+            effective_goal = (
+                f"{role_config.instructions}\n\n목표:\n{goal}"
+                if role_config.instructions
+                else goal
+            )
         try:
             result = delegate_task(
                 parent_agent=parent_agent,
-                goal=goal,
+                goal=effective_goal,
                 context=context,
                 tasks=None,
-                toolsets=["terminal", "file"],
+                toolsets=list(role_config.toolsets),
                 role="leaf",
             )
             with _CODER_RUN_LOCK:
@@ -308,14 +320,17 @@ def _spawn_detached_coder(
                     rec["status"] = "completed"
                     rec["result"] = result
         except Exception as exc:
-            logger.exception("Coder run %s failed: %s", coder_run_id, exc)
+            logger.exception(
+                "Run %s (%s) failed: %s", coder_run_id, role_config.name, exc
+            )
             with _CODER_RUN_LOCK:
                 rec = _CODER_RUN_REGISTRY.get(coder_run_id)
                 if rec is not None and rec.get("status") != "cancelled":
                     rec["status"] = "failed"
                     rec["error"] = str(exc)
         finally:
-            _coder_child_ctx.reset(token)
+            if token is not None:
+                _coder_child_ctx.reset(token)
             unregister_coder_sink(coder_run_id)
             try:
                 from . import coder_orchestration
@@ -324,7 +339,7 @@ def _spawn_detached_coder(
                 logger.debug("completion notify failed", exc_info=True)
 
     thread = threading.Thread(
-        target=_runner, name=f"coder-{coder_run_id}", daemon=True
+        target=_runner, name=f"{role_config.name}-{coder_run_id}", daemon=True
     )
     thread.start()
     return coder_run_id
