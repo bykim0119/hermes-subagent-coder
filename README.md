@@ -14,6 +14,13 @@ so a stock `pip install`ed hermes stays byte-for-byte unmodified.
 
 - **`delegate_task_background` tool** — the LLM hands a coding task to a detached
   coder run instead of blocking the main turn.
+- **Orchestration tools** — `coder_status` (inspect running/finished coder runs
+  and remaining capacity) and `cancel_coder` (cancel a run programmatically).
+  Scope is limited to agent-spawned runs; `/code` slash runs are excluded.
+- **Completion wake** — when an agent-spawned coder finishes, a synthetic
+  internal message is injected into the main session so the agent wakes on a new
+  turn and can schedule dependent follow-ups. Mirrors hermes's stock
+  background-process completion notification, so **no polling is required**.
 - **`codex-exec` model provider** — wraps the Codex CLI in an OpenAI
   chat-completion shape.
 - **Discord overlay**
@@ -56,6 +63,50 @@ hermes plugins remove subagent_coder
 - **Follow up:** just reply in the coder thread — it resumes the same session.
 - **Cancel:** send `stop` (or `cancel`) in the thread.
 
+## Orchestrating multiple coders
+
+For a multi-task job, the main agent can run several coders and chain dependent
+work:
+
+- Fire **independent** tasks in parallel — call `delegate_task_background`
+  multiple times in one turn.
+- A **dependent** task is delegated only after the completion wake(s) it depends
+  on arrive: the agent ends its turn, gets woken when each coder finishes, then
+  delegates the next step.
+- `coder_status` reports active runs and remaining capacity (capacity is
+  `HERMES_CODER_MAX_CONCURRENT`); `cancel_coder` stops a run that's going the
+  wrong way.
+
+### The mechanism vs. the agent's role
+
+The plugin only provides the **mechanism** (spawn / observe / cancel / wake). It
+does **not** decide *what* to parallelize or whether the agent writes code
+itself — that is governed by the agent's **persona / system prompt**, which lives
+in your hermes config (`~/.hermes/SOUL.md` or your equivalent system-prompt
+source), **not in this plugin**.
+
+In practice the agent will only behave as a disciplined orchestrator if its
+persona says so. Without role framing it tends to (a) poll `coder_status` inside
+one turn instead of relying on the wake, and (b) do small integration steps
+itself instead of delegating them. Add an orchestrator block to the persona, e.g.:
+
+```text
+When given coding work, you are the project orchestrator:
+- Do NOT write code yourself. Delegate every coding task — including small
+  integration/glue steps — via delegate_task_background.
+- Split the request into independent vs dependent tasks. Fire independent tasks
+  in parallel (several calls in one turn); delegate a dependent task only after
+  the completion notification(s) it depends on arrive.
+- After delegating, END your turn and wait — completions are delivered to you
+  automatically. Do not poll coder_status in a loop; call it only when the user
+  asks for progress or to check capacity before a new delegation.
+- When coders finish, collect and verify their results, then report back.
+```
+
+> Note: the persona file is part of your hermes setup, not this repo. Updating
+> the plugin (`hermes plugins update`) does not change it — keep your persona
+> under your own backup.
+
 ## Configuration
 
 Tunables resolve in priority order **env var → `delegation.coder.<key>` in
@@ -72,7 +123,10 @@ hermes `config.yaml` → default**:
 
 `register(ctx)` is the single wiring entry point. It:
 
-- registers the `delegate_task_background` tool and the `codex-exec` provider,
+- registers the `delegate_task_background`, `coder_status`, and `cancel_coder`
+  tools and the `codex-exec` provider,
+- records the main session's routing on each agent-spawned run and injects the
+  completion wake when the run finishes,
 - wraps `AIAgent._invoke_tool` / `_execute_tool_calls_sequential` to inject
   `parent_agent` (stock hermes doesn't pass it through the registry dispatch),
 - wraps `_build_child_agent` / `_build_child_progress_callback` to pin the coder
