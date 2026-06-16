@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 from tools.delegate_tool import registry, check_delegate_requirements
 
 from .delegate_background import (
+    YIELD_NOTE,
     cancel_coder_run,
     claim_completion_notify,
     get_orchestration_run,
@@ -72,6 +73,7 @@ def coder_status(
         "max": mx,
         "available": max(mx - active, 0),
         "runs": runs,
+        "note": YIELD_NOTE,
     }
 
 
@@ -209,6 +211,11 @@ def register_orchestration_tools() -> None:
         name="coder_status",
         toolset="delegation",
         schema=CODER_STATUS_SCHEMA,
+        description=(
+            "오케스트레이션 코더의 상태/용량을 조회한다. 코더 완료는 자동 알림으로 "
+            "도착하므로, 완료를 기다리려 이 도구를 반복 호출(폴링)하지 마라. "
+            "사용자가 진행 상황을 물을 때, 또는 새 위임 전 용량 확인이 필요할 때만 호출하라."
+        ),
         handler=lambda args, **kw: json.dumps(
             coder_status(args.get("coder_run_id"), args.get("include")),
             ensure_ascii=False,
