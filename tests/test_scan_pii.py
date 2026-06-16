@@ -49,3 +49,18 @@ def test_scan_pii_in_core_for_child_inheritance():
     import toolsets
     sp.install_pii_toolset()
     assert "scan_pii" in toolsets._HERMES_CORE_TOOLS
+
+
+def test_scan_pii_added_to_delegation_toolset_for_main_visibility():
+    """메인 self.tools는 enable한 toolset을 resolve해 채워진다. core 리스트 append만으론
+    메인 도구에 안 잡히므로, 메인이 실제로 가진 toolset(delegate_task_background가 있는
+    delegation 묶음)에 scan_pii를 끼워야 메인이 보유 → reviewer가 물려받는다.
+    1차 coder_status(install_orchestration_toolset_membership)와 동일 패턴."""
+    import toolsets
+    sp.install_pii_toolset()
+    deleg = [
+        ts for ts in toolsets.TOOLSETS.values()
+        if isinstance(ts.get("tools"), list) and "delegate_task" in ts["tools"]
+    ]
+    assert deleg, "delegate_task 가진 toolset(delegation)이 없음"
+    assert all("scan_pii" in ts["tools"] for ts in deleg)

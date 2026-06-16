@@ -141,9 +141,21 @@ def install_pii_toolset() -> None:
     elif "scan_pii" not in ts.get("tools", []):
         ts["tools"].append("scan_pii")
 
+    # 메인 self.tools는 enable한 toolset을 resolve해 채워지므로, core 리스트에만
+    # append하면 메인 도구에 안 잡힌다. 메인이 실제로 가진 toolset(delegate_task가 있는
+    # delegation 묶음 — delegate_task_background도 같은 묶음)에 직접 끼워야 메인이 scan_pii를
+    # 보유하고, 자식(reviewer)이 'pii' 요청 시 물려받는다.
+    # 1차 install_orchestration_toolset_membership과 동일 패턴(by-ref core는 in-place,
+    # delegate_task 가진 toolset에 멤버십 추가).
     core = toolsets._HERMES_CORE_TOOLS
     if "scan_pii" not in core:
         core.append("scan_pii")
+    for ts in toolsets.TOOLSETS.values():
+        tools = ts.get("tools")
+        if tools is core or not isinstance(tools, list):
+            continue
+        if "delegate_task" in tools and "scan_pii" not in tools:
+            tools.append("scan_pii")
 
 
 register_scan_pii_tool()
