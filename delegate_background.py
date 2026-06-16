@@ -295,6 +295,14 @@ def _spawn_detached_coder(
 
         register_coder_sink(coder_run_id, sink)
         token = None
+        # 역할 안내문은 경로(codex/추론모델)와 무관하게 goal 앞에 주입한다.
+        # coder는 instructions=""라 prepend 영향이 없고, tester/planner/reviewer는
+        # 자기 안내문을 받는다.
+        effective_goal = (
+            f"{role_config.instructions}\n\n목표:\n{goal}"
+            if role_config.instructions
+            else goal
+        )
         if use_codex:
             token = _coder_child_ctx.set(
                 {
@@ -302,13 +310,6 @@ def _spawn_detached_coder(
                     "provider": "codex-exec",
                     "api_mode": "chat_completions",
                 }
-            )
-            effective_goal = goal
-        else:
-            effective_goal = (
-                f"{role_config.instructions}\n\n목표:\n{goal}"
-                if role_config.instructions
-                else goal
             )
         try:
             result = delegate_task(
