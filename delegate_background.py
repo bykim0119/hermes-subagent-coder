@@ -122,6 +122,7 @@ def list_orchestration_runs() -> List[Dict[str, Any]]:
                 "goal": rec.get("goal"),
                 "status": rec.get("status"),
                 "started_at": rec.get("started_at"),
+                "role": rec.get("role", "coder"),
             }
             for cid, rec in _CODER_RUN_REGISTRY.items()
             if rec.get("main_source") is not None
@@ -146,6 +147,7 @@ def get_orchestration_run(
             "status": rec.get("status"),
             "started_at": rec.get("started_at"),
             "parent_task_id": rec.get("parent_task_id"),
+            "role": rec.get("role", "coder"),
         }
         if "result" in wanted:
             if rec.get("result") is not None:
