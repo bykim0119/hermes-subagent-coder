@@ -41,3 +41,11 @@ def test_pii_toolset_registered_and_scan_pii_in_it():
     sp.install_pii_toolset()
     assert "pii" in toolsets.TOOLSETS
     assert "scan_pii" in toolsets.TOOLSETS["pii"]["tools"]
+
+
+def test_scan_pii_in_core_for_child_inheritance():
+    """자식(reviewer)은 부모(메인)가 가진 toolset만 물려받는다(delegate_tool 규칙).
+    메인이 scan_pii를 가져야 reviewer가 'pii' 요청 시 통과하므로 core에 등록."""
+    import toolsets
+    sp.install_pii_toolset()
+    assert "scan_pii" in toolsets._HERMES_CORE_TOOLS

@@ -120,22 +120,30 @@ def register_scan_pii_tool() -> None:
 
 
 def install_pii_toolset() -> None:
-    """reviewer 전용 ``pii`` toolset을 TOOLSETS에 정의(멱등).
+    """``pii`` toolset 정의 + scan_pii를 core에 등록(멱등).
 
-    reviewer의 toolsets=("file","pii")가 delegate_task로 넘어갈 때 hermes가
-    이 toolset의 tools(scan_pii)를 자식에게 부여한다. 다른 역할엔 안 준다.
+    hermes의 자식 toolset 규칙(delegate_tool.py: ``child_toolsets = [t for t in
+    toolsets if t in expanded_parent]``)은 **부모(메인)가 가진 toolset만** 자식에게
+    물려준다. 메인이 scan_pii를 가져야 ``_expand_parent_toolsets``가 'pii'를 부모
+    toolset으로 인식해 reviewer(자식)의 toolsets=("file","pii") 요청이 통과한다.
+    그래서 scan_pii를 _HERMES_CORE_TOOLS에 등록한다(1차 coder_status와 동일 패턴).
+    다른 역할도 도구를 *볼 수는* 있으나, 안내문상 reviewer만 사용한다.
     """
     import toolsets
 
     ts = toolsets.TOOLSETS.get("pii")
     if ts is None:
         toolsets.TOOLSETS["pii"] = {
-            "description": "개인정보/비밀 스캔 (reviewer 전용)",
+            "description": "개인정보/비밀 스캔 (reviewer 역할용)",
             "tools": ["scan_pii"],
             "includes": [],
         }
     elif "scan_pii" not in ts.get("tools", []):
         ts["tools"].append("scan_pii")
+
+    core = toolsets._HERMES_CORE_TOOLS
+    if "scan_pii" not in core:
+        core.append("scan_pii")
 
 
 register_scan_pii_tool()
