@@ -6,9 +6,7 @@ Hermes delegates a coding task to a `codex exec` subprocess running in a daemon
 thread and streams live progress back to the chat UI — Discord today, with a
 platform-agnostic core.
 
-It installs entirely as a plugin: **no fork of hermes required**. Every hook into
-stock hermes is applied at `register(ctx)` time via runtime wraps / monkey-patches,
-so a stock `pip install`ed hermes stays byte-for-byte unmodified.
+It installs entirely as a plugin — **no fork of hermes required**.
 
 ## What it adds
 
@@ -118,26 +116,6 @@ hermes `config.yaml` → default**:
 | Max concurrent coder runs | `HERMES_CODER_MAX_CONCURRENT` | `3` |
 | Progress debounce (ms) | `HERMES_CODER_DEBOUNCE_MS` | `250` |
 | Allow Discord DMs | `DISCORD_ALLOW_DMS` | `true` |
-
-## How it stays fork-free
-
-`register(ctx)` is the single wiring entry point. It:
-
-- registers the `delegate_task_background`, `coder_status`, and `cancel_coder`
-  tools and the `codex-exec` provider,
-- records the main session's routing on each agent-spawned run and injects the
-  completion wake when the run finishes,
-- wraps `AIAgent._invoke_tool` / `_execute_tool_calls_sequential` to inject
-  `parent_agent` (stock hermes doesn't pass it through the registry dispatch),
-- wraps `_build_child_agent` / `_build_child_progress_callback` to pin the coder
-  child's id and provider,
-- installs the per-turn `coder_spawn_callback` and Discord thread routing by
-  wrapping the gateway runner and `DiscordAdapter` methods,
-- adds `delegate_task_background` to the relevant toolsets,
-- resolves `codex-exec` credentials.
-
-All wraps are idempotent and guard on the relevant module being loaded, so in CLI
-mode (no gateway / no Discord) the platform wires are no-ops.
 
 ## Development
 
