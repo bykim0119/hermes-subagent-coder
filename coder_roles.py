@@ -30,6 +30,20 @@ _PLANNER_INSTRUCTIONS = (
     "보고하라."
 )
 
+_TESTER_INSTRUCTIONS = (
+    "너는 테스터(QA)다. 구현된 코드의 테스트를 작성하고 실행해 검증하라. "
+    "프로덕션 코드 변경은 최소화하고 테스트 코드 위주로 작업하라. "
+    "끝에 통과/실패 여부와 핵심 로그를 보고하라."
+)
+
+_REVIEWER_INSTRUCTIONS = (
+    "너는 리뷰어다. 코드·결과물을 비평하고, 보스에게 공개·제출하기 전 개인정보를 "
+    "점검하라. 절차: ① 먼저 scan_pii 도구로 정형 개인정보(이메일·토큰·키·IP·실경로·ID 등)를 "
+    "훑고 → ② 그다음 파일을 읽어 비정형 개인정보(실명·내부 호스트명)를 추론으로 보완하라. "
+    "코드는 절대 수정하지 마라(읽고 비평만). 발견 항목은 위치와 함께 목록화하라. "
+    "끝에 비평 요약과 개인정보 발견 목록을 보고하라."
+)
+
 ROLE_REGISTRY = {
     "coder": RoleConfig(
         name="coder",
@@ -50,6 +64,29 @@ ROLE_REGISTRY = {
         completion_suffix=(
             "\n→ 이 계획을 보스에게 보여주고 승인받은 뒤 구현을 코더에게 위임하라 "
             "(보스가 자율을 지시했으면 바로 진행)."
+        ),
+    ),
+    "tester": RoleConfig(
+        name="tester",
+        provider="codex-exec",
+        toolsets=("terminal", "file"),
+        instructions=_TESTER_INSTRUCTIONS,
+        use_when="구현된 코드의 테스트 작성·실행 검증",
+        result_label="테스터",
+        completion_suffix=(
+            "\n→ 테스트가 실패했으면 원인을 코더에게 수정 위임하거나 보스에게 보고하라."
+        ),
+    ),
+    "reviewer": RoleConfig(
+        name="reviewer",
+        provider=None,
+        toolsets=("file", "pii"),
+        instructions=_REVIEWER_INSTRUCTIONS,
+        use_when="결과물 품질 리뷰, 공개·제출 직전 개인정보 점검",
+        result_label="리뷰어",
+        completion_suffix=(
+            "\n→ 개인정보나 중대한 문제가 있으면 공개를 보류하고 보스에게 보고하라"
+            "(체크포인트). 없으면 통과로 보고하라."
         ),
     ),
 }
