@@ -1,5 +1,5 @@
 """코더 오케스트레이션 — 라우팅 캡처 + 조회 헬퍼 + 도구 단위 테스트."""
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -167,3 +167,27 @@ def test_register_and_membership():
     # 멱등
     orch.install_orchestration_toolset_membership()
     assert toolsets._HERMES_CORE_TOOLS.count("coder_status") == 1
+
+
+# --- 폴링 억제 안내(yield guidance) -----------------------------------------
+
+def test_delegate_background_return_has_yield_note():
+    agent = MagicMock()
+    agent.task_id = "t1"
+    with patch.object(db, "_spawn_detached_coder"), \
+         patch("subagent_coder.coder_config.check_codex_auth", return_value=None):
+        result = db.delegate_task_background(parent_agent=agent, goal="g")
+    assert result["status"] == "spawned"
+    assert result["note"] == db.YIELD_NOTE
+
+
+def test_coder_status_summary_has_yield_note():
+    out = orch.coder_status()
+    assert out["note"] == db.YIELD_NOTE
+
+
+def test_coder_status_detail_has_no_note():
+    db._register_coder_run("coder-n", "parent", "g")
+    db.record_main_routing("coder-n", _src(), loop="LOOP")
+    out = orch.coder_status("coder-n")
+    assert "note" not in out

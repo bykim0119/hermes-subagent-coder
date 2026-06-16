@@ -65,6 +65,16 @@ _CODER_RUN_LOCK = threading.Lock()
 
 _LOG_MAXLEN = 200  # bounded coder NDJSON event tail per run
 
+# 메인이 위임 후 in-turn 폴링(coder_status 반복 호출)에 갇히지 않도록, 스폰/조회
+# 도구 결과에 동봉하는 안내. 코더 완료는 자동 알림(완료 웨이크)으로 도착하므로
+# 메인은 위임을 마치면 턴을 종료하고 기다리면 된다 — 라이브에서 폴링 루프 관찰 후 추가.
+YIELD_NOTE = (
+    "코더는 백그라운드에서 실행됩니다. 각 코더가 끝나면 결과와 함께 자동으로 "
+    "알림이 도착합니다. 진행 상황을 보려고 coder_status를 반복 호출(폴링)하지 "
+    "마세요 — 위임을 마쳤으면 이 턴을 종료하고 완료 알림을 기다리세요. "
+    "coder_status는 사용자가 진행 상황을 물을 때만 호출하세요."
+)
+
 
 def _register_coder_run(coder_run_id: str, parent_task_id: str, goal: str) -> None:
     with _CODER_RUN_LOCK:
@@ -542,7 +552,12 @@ def delegate_task_background(
             spawn_cb(coder_run_id, goal or "")
         except Exception as cb_err:
             logger.debug("coder_spawn_callback error: %s", cb_err)
-    return {"coder_run_id": coder_run_id, "status": "spawned", "goal": goal}
+    return {
+        "coder_run_id": coder_run_id,
+        "status": "spawned",
+        "goal": goal,
+        "note": YIELD_NOTE,
+    }
 
 
 DELEGATE_TASK_BACKGROUND_SCHEMA = {
@@ -585,6 +600,12 @@ def register_delegate_task_background() -> None:
         name="delegate_task_background",
         toolset="delegation",
         schema=DELEGATE_TASK_BACKGROUND_SCHEMA,
+        description=(
+            "코딩 작업을 코더 서브에이전트에게 백그라운드로 위임한다. 즉시 반환하며, "
+            "코더는 별도로 실행되다 끝나면 자동으로 결과 알림이 도착한다. 독립 작업은 "
+            "한 턴에 여러 번 호출해 병렬로 돌려라. 위임 후에는 이 턴을 종료하라 — "
+            "완료를 기다리려 coder_status를 폴링하지 마라(완료는 자동 통지된다)."
+        ),
         handler=lambda args, **kw: json.dumps(
             delegate_task_background(
                 # Sequential path: registry.dispatch passes no parent_agent, so
