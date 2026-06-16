@@ -100,6 +100,7 @@ def _install_delegate_dispatch_wrap() -> None:
                     parent_agent=self,
                     goal=function_args.get("goal"),
                     context=function_args.get("context") or "",
+                    role=function_args.get("role"),
                 ),
                 ensure_ascii=False,
             )

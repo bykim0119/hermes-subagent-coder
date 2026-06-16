@@ -31,6 +31,8 @@ from tools.delegate_tool import (
     interrupt_subagent,
 )
 
+from . import coder_roles
+
 logger = logging.getLogger(__name__)
 
 
@@ -515,11 +517,12 @@ def delegate_task_background(
     goal: Optional[str] = None,
     context: str = "",
     provider: Optional[str] = None,
+    role: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Async variant of delegate_task: spawns the coder detached and returns immediately.
+    """코딩/설계 작업을 역할별 배경 서브에이전트에 위임하고 즉시 반환.
 
-    Returns:
-        {"coder_run_id": str, "status": "spawned", "goal": str}
+    role: "coder"(기본, codex 구현) / "planner"(추론모델, 구현계획서 작성) 등.
+    미지정·미지의 role은 coder로 폴백.
 
     The gateway is expected to create a Discord thread keyed by coder_run_id
     and route subagent_progress events into that thread.
@@ -531,17 +534,20 @@ def delegate_task_background(
     if not goal:
         return {"error": "delegate_task_background requires a non-empty goal."}
 
-    # Surface missing/expired codex auth as a structured error instead of
-    # letting codex fail mid-NDJSON-stream with an opaque returncode.
-    from .coder_config import check_codex_auth
-    auth_err = check_codex_auth()
-    if auth_err:
-        return {
-            "coder_run_id": None,
-            "status": "auth_error",
-            "error": auth_err,
-            "goal": goal,
-        }
+    role_config = coder_roles.get_role(role)
+
+    # codex 역할만 codex 인증을 사전 점검 (추론모델 역할은 메인 자격 사용).
+    if role_config.provider == "codex-exec":
+        from .coder_config import check_codex_auth
+        auth_err = check_codex_auth()
+        if auth_err:
+            return {
+                "coder_run_id": None,
+                "status": "auth_error",
+                "error": auth_err,
+                "goal": goal,
+                "role": role_config.name,
+            }
 
     coder_run_id = f"coder-{_uuid.uuid4().hex[:8]}"
     parent_task_id = (
@@ -549,13 +555,13 @@ def delegate_task_background(
         or getattr(parent_agent, "_subagent_id", None)
         or "unknown"
     )
-    _register_coder_run(coder_run_id, parent_task_id, goal)
+    _register_coder_run(coder_run_id, parent_task_id, goal, role=role_config.name)
     _spawn_detached_coder(
         parent_agent=parent_agent,
         goal=goal,
         context=context,
         coder_run_id=coder_run_id,
-        provider=provider or "codex-exec",
+        role_config=role_config,
     )
     # Fire coder_spawn_callback so the active platform adapter can open a UI
     # surface (e.g. a Discord thread) bound to coder_run_id. Lives here (not in
@@ -571,6 +577,7 @@ def delegate_task_background(
         "coder_run_id": coder_run_id,
         "status": "spawned",
         "goal": goal,
+        "role": role_config.name,
         "note": YIELD_NOTE,
     }
 
@@ -591,6 +598,15 @@ DELEGATE_TASK_BACKGROUND_SCHEMA = {
             "description": (
                 "Additional context: file paths, error messages, constraints, "
                 "links to related issues."
+            ),
+        },
+        "role": {
+            "type": "string",
+            "enum": ["coder", "planner"],
+            "description": (
+                "위임할 역할. 'coder'=범위가 분명한 구현·수정(기본). "
+                "'planner'=크거나 익숙지 않아 먼저 조사·구현계획서가 필요한 작업 "
+                "(계획서를 문서로 작성해 돌려줌). 미지정 시 coder."
             ),
         },
     },
@@ -630,6 +646,7 @@ def register_delegate_task_background() -> None:
                 parent_agent=kw.get("parent_agent") or _dispatch_parent_agent.get(),
                 goal=args.get("goal"),
                 context=args.get("context") or "",
+                role=args.get("role"),
             ),
             ensure_ascii=False,
         ),

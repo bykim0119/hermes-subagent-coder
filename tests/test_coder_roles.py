@@ -87,3 +87,42 @@ def test_spawn_planner_uses_reasoning_path():
     assert "설계자" in captured["goal"]                    # 안내문 prefix 주입
     assert "그 기능 설계해" in captured["goal"]            # 원 목표 포함
     db._CODER_RUN_REGISTRY.clear()
+
+
+def test_delegate_background_routes_role():
+    db._CODER_RUN_REGISTRY.clear()
+    seen = {}
+
+    def fake_spawn(parent_agent, goal, context, coder_run_id, role_config):
+        seen["role"] = role_config.name
+        return coder_run_id
+
+    agent = MagicMock(); agent.task_id = "t"
+    with patch.object(db, "_spawn_detached_coder", fake_spawn), \
+         patch("subagent_coder.coder_config.check_codex_auth", return_value=None):
+        out = db.delegate_task_background(parent_agent=agent, goal="g", role="planner")
+    assert out["role"] == "planner"
+    assert seen["role"] == "planner"
+    db._CODER_RUN_REGISTRY.clear()
+
+
+def test_delegate_background_defaults_to_coder():
+    db._CODER_RUN_REGISTRY.clear()
+    seen = {}
+
+    def fake_spawn(parent_agent, goal, context, coder_run_id, role_config):
+        seen["role"] = role_config.name
+        return coder_run_id
+
+    agent = MagicMock(); agent.task_id = "t"
+    with patch.object(db, "_spawn_detached_coder", fake_spawn), \
+         patch("subagent_coder.coder_config.check_codex_auth", return_value=None):
+        out = db.delegate_task_background(parent_agent=agent, goal="g")   # role 미지정
+    assert out["role"] == "coder"
+    assert seen["role"] == "coder"
+    db._CODER_RUN_REGISTRY.clear()
+
+
+def test_schema_has_role_enum():
+    enum = db.DELEGATE_TASK_BACKGROUND_SCHEMA["properties"]["role"]["enum"]
+    assert "coder" in enum and "planner" in enum
