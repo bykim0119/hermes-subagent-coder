@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from subagent_coder import coder_orchestration as orch
-from subagent_coder import delegate_background as db
+from agent_company import orchestration as orch
+from agent_company import delegate_background as db
 
 
 @pytest.fixture(autouse=True)
@@ -175,7 +175,7 @@ def test_delegate_background_return_has_yield_note():
     agent = MagicMock()
     agent.task_id = "t1"
     with patch.object(db, "_spawn_detached_coder"), \
-         patch("subagent_coder.coder_config.check_codex_auth", return_value=None):
+         patch("agent_company.config.check_codex_auth", return_value=None):
         result = db.delegate_task_background(parent_agent=agent, goal="g")
     assert result["status"] == "spawned"
     assert result["note"] == db.YIELD_NOTE
@@ -191,3 +191,17 @@ def test_coder_status_detail_has_no_note():
     db.record_main_routing("coder-n", _src(), loop="LOOP")
     out = orch.coder_status("coder-n")
     assert "note" not in out
+
+
+def test_status_summary_includes_role():
+    db._register_coder_run("rrole", "parent", "g", role="planner")
+    db.record_main_routing("rrole", _src(), loop="LOOP")
+    runs = db.list_orchestration_runs()
+    assert any(r["coder_run_id"] == "rrole" and r["role"] == "planner" for r in runs)
+
+
+def test_status_detail_includes_role():
+    db._register_coder_run("rrole2", "parent", "g", role="planner")
+    db.record_main_routing("rrole2", _src(), loop="LOOP")
+    detail = db.get_orchestration_run("rrole2")
+    assert detail["role"] == "planner"

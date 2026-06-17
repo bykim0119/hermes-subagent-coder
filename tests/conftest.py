@@ -1,8 +1,8 @@
-"""Test bootstrap for the standalone subagent_coder plugin repo.
+"""Test bootstrap for the standalone agent_company plugin repo.
 
 Repo root *is* the plugin package (flat layout required by ``hermes plugins
 install``). Two jobs:
-  1. Load the flat root package as ``subagent_coder`` so tests can import it.
+  1. Load the flat root package as ``agent_company`` so tests can import it.
   2. Stop pytest from importing the root ``__init__.py`` as a stray package
      node (it can't — the package is meant to be loaded by name, and the repo
      dir name isn't a valid Python identifier).
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_NAME = "subagent_coder"
+_NAME = "agent_company"
 
 if _NAME not in sys.modules:
     spec = importlib.util.spec_from_file_location(

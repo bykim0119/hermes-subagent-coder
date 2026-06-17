@@ -33,7 +33,7 @@ _LOG_TAIL = 20  # status/실패알림에 노출할 로그 tail 이벤트 수
 
 def _max_concurrent() -> int:
     try:
-        from .coder_config import coder_setting
+        from .config import coder_setting
 
         return coder_setting(
             "max_concurrent",
@@ -99,19 +99,24 @@ def _format_log_line(evt: Dict[str, Any]) -> str:
 
 
 def _build_completion_text(coder_run_id: str, snap: Dict[str, Any]) -> str:
+    from .roles import get_role
+
+    role_cfg = get_role(snap.get("role"))
+    label = role_cfg.result_label
+    suffix = role_cfg.completion_suffix
     goal = snap.get("goal")
     status = snap.get("status")
     if status == "cancelled":
-        return f"[코더 {coder_run_id} 취소됨] 작업:{goal}"
+        return f"[{label} {coder_run_id} 취소됨] 작업:{goal}"
     if status == "failed":
         tail = "\n".join(
             _format_log_line(e) for e in (snap.get("log") or [])[-_LOG_TAIL:]
         )
         return (
-            f"[코더 {coder_run_id} 실패] 작업:{goal} 에러:{snap.get('error')}\n"
+            f"[{label} {coder_run_id} 실패] 작업:{goal} 에러:{snap.get('error')}\n"
             f"최근 로그:\n{tail}"
         )
-    return f"[코더 {coder_run_id} 완료] 작업:{goal}\n결과:{snap.get('result')}"
+    return f"[{label} {coder_run_id} 완료] 작업:{goal}\n결과:{snap.get('result')}{suffix}"
 
 
 def _resolve_adapter(source):

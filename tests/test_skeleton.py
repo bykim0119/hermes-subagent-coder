@@ -2,8 +2,8 @@
 import importlib
 
 
-def test_subagent_coder_module_importable():
-    mod = importlib.import_module("subagent_coder")
+def test_agent_company_module_importable():
+    mod = importlib.import_module("agent_company")
     assert hasattr(mod, "register"), "register entry point 누락"
     assert callable(mod.register)
 
@@ -16,7 +16,7 @@ def test_plugin_yaml_exists_with_required_fields():
     p = Path(__file__).resolve().parents[1] / "plugin.yaml"
     assert p.exists(), f"plugin.yaml not found at {p}"
     data = yaml.safe_load(p.read_text())
-    assert data.get("name") == "subagent_coder"
+    assert data.get("name") == "agent_company"
     # label/description: Task 0.2 결과 — label 필드 지원 확인됨
     assert data.get("label")
     assert data.get("description")

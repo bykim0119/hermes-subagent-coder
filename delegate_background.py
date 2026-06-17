@@ -1,11 +1,11 @@
 """Background coder delegation — spawns a Codex CLI coder child detached.
 
 Moved out of ``tools/delegate_tool.py`` so the stock file stays diff-free and
-``subagent_coder`` is installable as a standalone ``~/.hermes/plugins/`` unit.
+``agent_company`` is installable as a standalone ``~/.hermes/plugins/`` unit.
 
 The coder child runs the STOCK ``delegate_task`` (no coder-specific params).
 Provider / api_mode / subagent_id overrides are injected at runtime by the
-wraps installed in ``subagent_coder.register(ctx)`` via the ``_coder_child_ctx``
+wraps installed in ``agent_company.register(ctx)`` via the ``_coder_child_ctx``
 ContextVar set inside ``_spawn_detached_coder._runner`` below. Because the coder
 spawn is a single-task delegation it runs on the ``_runner`` thread inline (no
 ThreadPoolExecutor boundary), so the ContextVar propagates cleanly.
@@ -31,13 +31,15 @@ from tools.delegate_tool import (
     interrupt_subagent,
 )
 
+from . import roles
+
 logger = logging.getLogger(__name__)
 
 
 # Runtime channel for the coder child overrides. Set by ``_spawn_detached_coder``
 # right before calling the stock ``delegate_task`` and read by the wraps around
 # ``_build_child_agent`` / ``_build_child_progress_callback`` (installed in
-# ``subagent_coder.register(ctx)``). ``None`` outside a coder spawn.
+# ``agent_company.register(ctx)``). ``None`` outside a coder spawn.
 _coder_child_ctx: ContextVar[Optional[dict]] = ContextVar(
     "coder_child_ctx", default=None
 )
@@ -46,7 +48,7 @@ _coder_child_ctx: ContextVar[Optional[dict]] = ContextVar(
 # dispatch path. ``registry.dispatch`` never forwards parent_agent, and the
 # sequential loop (``_execute_tool_calls_sequential``) routes unknown registry
 # tools straight to ``handle_function_call`` — so the wrap installed in
-# ``subagent_coder.register(ctx)`` sets this ContextVar to ``self`` around the
+# ``agent_company.register(ctx)`` sets this ContextVar to ``self`` around the
 # loop and the handler below reads it as a fallback. The sequential loop runs
 # on the agent's own thread (no ThreadPoolExecutor), so the ContextVar
 # propagates. The concurrent path injects parent_agent directly via the
@@ -76,13 +78,16 @@ YIELD_NOTE = (
 )
 
 
-def _register_coder_run(coder_run_id: str, parent_task_id: str, goal: str) -> None:
+def _register_coder_run(
+    coder_run_id: str, parent_task_id: str, goal: str, role: str = "coder"
+) -> None:
     with _CODER_RUN_LOCK:
         _CODER_RUN_REGISTRY[coder_run_id] = {
             "parent_task_id": parent_task_id,
             "goal": goal,
             "started_at": time.time(),
             "status": "running",
+            "role": role,
             "log": deque(maxlen=_LOG_MAXLEN),
         }
 
@@ -117,6 +122,7 @@ def list_orchestration_runs() -> List[Dict[str, Any]]:
                 "goal": rec.get("goal"),
                 "status": rec.get("status"),
                 "started_at": rec.get("started_at"),
+                "role": rec.get("role", "coder"),
             }
             for cid, rec in _CODER_RUN_REGISTRY.items()
             if rec.get("main_source") is not None
@@ -141,6 +147,7 @@ def get_orchestration_run(
             "status": rec.get("status"),
             "started_at": rec.get("started_at"),
             "parent_task_id": rec.get("parent_task_id"),
+            "role": rec.get("role", "coder"),
         }
         if "result" in wanted:
             if rec.get("result") is not None:
@@ -174,6 +181,7 @@ def claim_completion_notify(coder_run_id: str) -> Optional[Dict[str, Any]]:
             "source": rec.get("main_source"),
             "loop": rec.get("main_loop"),
             "log": list(rec.get("log") or []),
+            "role": rec.get("role", "coder"),
         }
 
 
@@ -241,7 +249,7 @@ def _build_coder_progress_sink(coder_run_id: str):
     def _sink(event) -> None:
         try:
             if event.event == "thread.started":
-                from .coder_sessions import get_global_sessions
+                from .sessions import get_global_sessions
                 tid = (event.data or {}).get("thread_id")
                 sessions = get_global_sessions()
                 if tid and sessions is not None:
@@ -253,9 +261,9 @@ def _build_coder_progress_sink(coder_run_id: str):
                         rec["log"].append({"event": event.event, "data": event.data})
             except Exception:
                 logger.debug("coder log capture failed", exc_info=True)
-            from . import coder_event_bus
+            from . import event_bus
             payload = {"event": event.event, "data": event.data}
-            coder_event_bus.dispatch(coder_run_id, payload)
+            event_bus.dispatch(coder_run_id, payload)
         except Exception:
             logger.debug("coder progress sink relay failed", exc_info=True)
 
@@ -267,17 +275,17 @@ def _spawn_detached_coder(
     goal: str,
     context: str,
     coder_run_id: str,
-    provider: str = "codex-exec",
+    role_config,
 ) -> str:
-    """Run the coder child in a background daemon thread.
+    """역할 설정에 따라 자식 에이전트를 백그라운드 데몬 스레드로 띄운다.
 
-    Returns immediately with the coder_run_id. The child runs the STOCK
-    ``delegate_task``; the ``_coder_child_ctx`` ContextVar (set here) drives the
-    register(ctx) wraps that inject ``override_provider``/``override_api_mode``
-    and pin ``child._subagent_id`` to ``coder_run_id`` so gateway can route its
-    progress events to the matching Discord thread.
+    coder(provider=codex-exec): 기존 codex 경로 — _coder_child_ctx로 provider/
+    api_mode override + subagent_id 핀. planner 등(provider=None): codex override
+    없이 메인 모델을 상속하고, 역할 안내문을 goal 앞에 주입한 뒤 stock delegate_task를
+    역할의 toolsets로 호출한다. 등록·완료 웨이크 배관은 양쪽 공통.
     """
     sink = _build_coder_progress_sink(coder_run_id)
+    use_codex = role_config.provider == "codex-exec"
 
     def _runner() -> None:
         # Imported lazily — codex_exec_client lives in this package and the
@@ -286,20 +294,30 @@ def _spawn_detached_coder(
         from tools.delegate_tool import delegate_task
 
         register_coder_sink(coder_run_id, sink)
+        # 역할 안내문은 경로(codex/추론모델)와 무관하게 goal 앞에 주입한다.
+        effective_goal = (
+            f"{role_config.instructions}\n\n목표:\n{goal}"
+            if role_config.instructions
+            else goal
+        )
+        # ctx(번호표)는 모든 역할에서 set한다 — 비-codex 진행 relay가 coder_run_id를
+        # 알아야 하기 때문. provider override·child._subagent_id 세팅은 use_codex로
+        # 가드해 codex만 적용(현행 동작 보존). 진행 relay는 progress wrap이 처리.
         token = _coder_child_ctx.set(
             {
                 "subagent_id": coder_run_id,
-                "provider": provider,
-                "api_mode": "chat_completions",
+                "use_codex": use_codex,
+                "provider": "codex-exec" if use_codex else None,
+                "api_mode": "chat_completions" if use_codex else None,
             }
         )
         try:
             result = delegate_task(
                 parent_agent=parent_agent,
-                goal=goal,
+                goal=effective_goal,
                 context=context,
                 tasks=None,
-                toolsets=["terminal", "file"],
+                toolsets=list(role_config.toolsets),
                 role="leaf",
             )
             with _CODER_RUN_LOCK:
@@ -308,23 +326,26 @@ def _spawn_detached_coder(
                     rec["status"] = "completed"
                     rec["result"] = result
         except Exception as exc:
-            logger.exception("Coder run %s failed: %s", coder_run_id, exc)
+            logger.exception(
+                "Run %s (%s) failed: %s", coder_run_id, role_config.name, exc
+            )
             with _CODER_RUN_LOCK:
                 rec = _CODER_RUN_REGISTRY.get(coder_run_id)
                 if rec is not None and rec.get("status") != "cancelled":
                     rec["status"] = "failed"
                     rec["error"] = str(exc)
         finally:
-            _coder_child_ctx.reset(token)
+            if token is not None:
+                _coder_child_ctx.reset(token)
             unregister_coder_sink(coder_run_id)
             try:
-                from . import coder_orchestration
-                coder_orchestration.notify_main_on_completion(coder_run_id)
+                from . import orchestration
+                orchestration.notify_main_on_completion(coder_run_id)
             except Exception:
                 logger.debug("completion notify failed", exc_info=True)
 
     thread = threading.Thread(
-        target=_runner, name=f"coder-{coder_run_id}", daemon=True
+        target=_runner, name=f"{role_config.name}-{coder_run_id}", daemon=True
     )
     thread.start()
     return coder_run_id
@@ -345,7 +366,7 @@ def _resolve_codex_command_and_args() -> tuple[str, list[str]]:
     override those, otherwise ``delegation.coder.args`` is meaningless
     on hosts where the auth resolver succeeds with its own args.
     """
-    from .coder_config import coder_setting
+    from .config import coder_setting
 
     explicit_command = coder_setting(
         "command",
@@ -403,7 +424,7 @@ def _spawn_codex_coder(
 
     Both modes share:
       * Gateway-level sink (``_build_coder_progress_sink``) — no parent_agent
-        dependency. Events flow through ``coder_event_bus``.
+        dependency. Events flow through ``event_bus``.
       * Workspace = ``os.getcwd()`` (gateway service cwd) — matches the
         CodexExecFacade default used by ``delegate_task_background``.
 
@@ -500,11 +521,12 @@ def delegate_task_background(
     goal: Optional[str] = None,
     context: str = "",
     provider: Optional[str] = None,
+    role: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Async variant of delegate_task: spawns the coder detached and returns immediately.
+    """코딩/설계 작업을 역할별 배경 서브에이전트에 위임하고 즉시 반환.
 
-    Returns:
-        {"coder_run_id": str, "status": "spawned", "goal": str}
+    role: "coder"(기본, codex 구현) / "planner"(추론모델, 구현계획서 작성) 등.
+    미지정·미지의 role은 coder로 폴백.
 
     The gateway is expected to create a Discord thread keyed by coder_run_id
     and route subagent_progress events into that thread.
@@ -516,31 +538,34 @@ def delegate_task_background(
     if not goal:
         return {"error": "delegate_task_background requires a non-empty goal."}
 
-    # Surface missing/expired codex auth as a structured error instead of
-    # letting codex fail mid-NDJSON-stream with an opaque returncode.
-    from .coder_config import check_codex_auth
-    auth_err = check_codex_auth()
-    if auth_err:
-        return {
-            "coder_run_id": None,
-            "status": "auth_error",
-            "error": auth_err,
-            "goal": goal,
-        }
+    role_config = roles.get_role(role)
 
-    coder_run_id = f"coder-{_uuid.uuid4().hex[:8]}"
+    # codex 역할만 codex 인증을 사전 점검 (추론모델 역할은 메인 자격 사용).
+    if role_config.provider == "codex-exec":
+        from .config import check_codex_auth
+        auth_err = check_codex_auth()
+        if auth_err:
+            return {
+                "coder_run_id": None,
+                "status": "auth_error",
+                "error": auth_err,
+                "goal": goal,
+                "role": role_config.name,
+            }
+
+    coder_run_id = f"agent-{_uuid.uuid4().hex[:8]}"
     parent_task_id = (
         getattr(parent_agent, "task_id", None)
         or getattr(parent_agent, "_subagent_id", None)
         or "unknown"
     )
-    _register_coder_run(coder_run_id, parent_task_id, goal)
+    _register_coder_run(coder_run_id, parent_task_id, goal, role=role_config.name)
     _spawn_detached_coder(
         parent_agent=parent_agent,
         goal=goal,
         context=context,
         coder_run_id=coder_run_id,
-        provider=provider or "codex-exec",
+        role_config=role_config,
     )
     # Fire coder_spawn_callback so the active platform adapter can open a UI
     # surface (e.g. a Discord thread) bound to coder_run_id. Lives here (not in
@@ -556,6 +581,7 @@ def delegate_task_background(
         "coder_run_id": coder_run_id,
         "status": "spawned",
         "goal": goal,
+        "role": role_config.name,
         "note": YIELD_NOTE,
     }
 
@@ -578,12 +604,24 @@ DELEGATE_TASK_BACKGROUND_SCHEMA = {
                 "links to related issues."
             ),
         },
+        "role": {
+            "type": "string",
+            "enum": ["coder", "planner", "tester", "reviewer"],
+            "description": (
+                "위임할 역할을 이 인자로 반드시 지정하라(goal 문장에 적지 말 것). "
+                "'coder'=범위가 분명한 구현·수정(기본). "
+                "'planner'=먼저 조사·구현계획서가 필요한 작업. "
+                "'tester'=구현된 코드의 테스트 작성·실행 검증. "
+                "'reviewer'=결과물 품질 리뷰 + 공개·제출 직전 개인정보 점검. "
+                "미지정 시 coder."
+            ),
+        },
     },
     "required": ["goal"],
 }
 
 
-# Registered at module load (i.e. when subagent_coder.register(ctx) does
+# Registered at module load (i.e. when agent_company.register(ctx) does
 # ``from . import delegate_background``). Dispatch itself is intercepted by the
 # AIAgent._invoke_tool wrap (parent_agent injection); this registration exists
 # so the tool schema/check_fn are advertised to the model.
@@ -601,9 +639,13 @@ def register_delegate_task_background() -> None:
         toolset="delegation",
         schema=DELEGATE_TASK_BACKGROUND_SCHEMA,
         description=(
-            "코딩 작업을 코더 서브에이전트에게 백그라운드로 위임한다. 즉시 반환하며, "
-            "코더는 별도로 실행되다 끝나면 자동으로 결과 알림이 도착한다. 독립 작업은 "
-            "한 턴에 여러 번 호출해 병렬로 돌려라. 위임 후에는 이 턴을 종료하라 — "
+            "작업을 역할별 서브에이전트에게 백그라운드로 위임한다. 즉시 반환하며, "
+            "서브에이전트가 끝나면 자동으로 결과 알림이 도착한다. "
+            "역할은 반드시 `role` 인자로 고른다 — 'coder'(범위가 분명한 구현·수정, 기본) "
+            "또는 'planner'(먼저 조사·설계해 구현계획서를 문서로 작성). "
+            "주의: 역할을 goal 문장에 적지 마라('planner처럼 해줘' 같은 식 금지). "
+            "planner를 원하면 goal에는 무엇을 설계할지만 적고 role='planner'로 지정하라. "
+            "독립 작업은 한 턴에 여러 번 호출해 병렬로 돌려라. 위임 후에는 이 턴을 종료하라 — "
             "완료를 기다리려 coder_status를 폴링하지 마라(완료는 자동 통지된다)."
         ),
         handler=lambda args, **kw: json.dumps(
@@ -615,6 +657,7 @@ def register_delegate_task_background() -> None:
                 parent_agent=kw.get("parent_agent") or _dispatch_parent_agent.get(),
                 goal=args.get("goal"),
                 context=args.get("context") or "",
+                role=args.get("role"),
             ),
             ensure_ascii=False,
         ),
