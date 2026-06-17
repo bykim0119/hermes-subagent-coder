@@ -24,6 +24,29 @@ if __package__:
 
 logger = logging.getLogger(__name__)
 
+
+def _relay_child_tool_call(run_id, tool_name, args=None, preview=None):
+    """비-codex 자식의 도구 호출을 coder_event_bus로 relay해 Discord 스레드에 표시.
+
+    coder_progress_formatter.format_event가 받는 ``{"event":"tool_call",...}``
+    형식으로 보낸다(임의 도구는 ``🔧 <tool>`` fallback으로 표시). 도구 호출이 아닌
+    라이프사이클 이벤트(tool_name 없음)는 무시한다. codex 역할은 호출되지 않는다
+    (progress wrap이 use_codex일 때 relay를 건너뜀).
+    """
+    if not tool_name:
+        return
+    try:
+        from . import coder_event_bus
+        payload = {"event": "tool_call", "tool": tool_name}
+        if isinstance(args, dict) and args.get("path"):
+            payload["path"] = args["path"]
+        if preview:
+            payload["preview"] = preview
+        coder_event_bus.dispatch(run_id, payload)
+    except Exception:
+        logger.debug("child progress relay failed", exc_info=True)
+
+
 # Per-turn coder_spawn_callback, set by the GatewayRunner._run_agent wrap and
 # read by the AIAgent.run_conversation wrap to install it on the agent. Both
 # run on the gateway loop thread within one _run_agent coroutine, so the
@@ -163,7 +186,21 @@ def _install_coder_child_wraps() -> None:
         ctx = _coder_child_ctx.get()
         if ctx is not None and "subagent_id" in kwargs:
             kwargs["subagent_id"] = ctx["subagent_id"]
-        return _orig_build_progress_cb(*args, **kwargs)
+        cb = _orig_build_progress_cb(*args, **kwargs)
+        # codex는 기존 sink가 진행을 표시하므로 relay 안 함(중복 방지).
+        if ctx is None or ctx.get("use_codex"):
+            return cb
+        run_id = ctx["subagent_id"]
+
+        def _relay(event_type, tool_name=None, preview=None, args=None, **kw):
+            if cb is not None:
+                try:
+                    cb(event_type, tool_name, preview, args, **kw)
+                except Exception:
+                    logger.debug("child progress cb failed", exc_info=True)
+            _relay_child_tool_call(run_id, tool_name, args, preview)
+
+        return _relay
 
     dt._build_child_agent = _wrapped_build_child_agent
     dt._build_child_progress_callback = _wrapped_build_progress_cb
