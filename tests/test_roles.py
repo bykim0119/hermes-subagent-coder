@@ -1,8 +1,8 @@
 """역할 fleet — 역할표 + 분기 + Planner 스폰 설정 검증."""
 from unittest.mock import MagicMock, patch
 
-from subagent_coder import coder_roles as cr
-from subagent_coder import delegate_background as db
+from agent_company import roles as cr
+from agent_company import delegate_background as db
 
 
 def test_registry_has_coder_and_planner():
@@ -50,10 +50,10 @@ def test_spawn_coder_uses_codex_path():
         return "coder-done"
 
     with patch("tools.delegate_tool.delegate_task", fake_delegate_task), \
-         patch("subagent_coder.codex_exec_client.register_coder_sink"), \
-         patch("subagent_coder.codex_exec_client.unregister_coder_sink"), \
-         patch("subagent_coder.coder_orchestration.notify_main_on_completion"):
-        from subagent_coder.coder_roles import get_role
+         patch("agent_company.codex_exec_client.register_coder_sink"), \
+         patch("agent_company.codex_exec_client.unregister_coder_sink"), \
+         patch("agent_company.orchestration.notify_main_on_completion"):
+        from agent_company.roles import get_role
         db._spawn_detached_coder(MagicMock(), "g", "", "rc", get_role("coder"))
         import time; time.sleep(0.2)
 
@@ -75,10 +75,10 @@ def test_spawn_planner_uses_reasoning_path():
         return "plan at docs/.../x.md"
 
     with patch("tools.delegate_tool.delegate_task", fake_delegate_task), \
-         patch("subagent_coder.codex_exec_client.register_coder_sink"), \
-         patch("subagent_coder.codex_exec_client.unregister_coder_sink"), \
-         patch("subagent_coder.coder_orchestration.notify_main_on_completion"):
-        from subagent_coder.coder_roles import get_role
+         patch("agent_company.codex_exec_client.register_coder_sink"), \
+         patch("agent_company.codex_exec_client.unregister_coder_sink"), \
+         patch("agent_company.orchestration.notify_main_on_completion"):
+        from agent_company.roles import get_role
         db._spawn_detached_coder(MagicMock(), "그 기능 설계해", "", "rp", get_role("planner"))
         import time; time.sleep(0.2)
 
@@ -99,7 +99,7 @@ def test_delegate_background_routes_role():
 
     agent = MagicMock(); agent.task_id = "t"
     with patch.object(db, "_spawn_detached_coder", fake_spawn), \
-         patch("subagent_coder.coder_config.check_codex_auth", return_value=None):
+         patch("agent_company.config.check_codex_auth", return_value=None):
         out = db.delegate_task_background(parent_agent=agent, goal="g", role="planner")
     assert out["role"] == "planner"
     assert seen["role"] == "planner"
@@ -116,7 +116,7 @@ def test_delegate_background_defaults_to_coder():
 
     agent = MagicMock(); agent.task_id = "t"
     with patch.object(db, "_spawn_detached_coder", fake_spawn), \
-         patch("subagent_coder.coder_config.check_codex_auth", return_value=None):
+         patch("agent_company.config.check_codex_auth", return_value=None):
         out = db.delegate_task_background(parent_agent=agent, goal="g")   # role 미지정
     assert out["role"] == "coder"
     assert seen["role"] == "coder"

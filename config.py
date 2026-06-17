@@ -18,7 +18,7 @@ import logging
 import os
 from typing import Any, Callable, Optional, TypeVar
 
-# Module-level import so tests can ``patch("plugins.subagent_coder.coder_config.load_config", ...)``
+# Module-level import so tests can ``patch("plugins.agent_company.config.load_config", ...)``
 # instead of patching the absolute path. Failure to import (e.g. standalone
 # pytest run) is tolerated — we just behave as if config is empty.
 try:

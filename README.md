@@ -1,4 +1,4 @@
-# hermes-subagent-coder
+# hermes-agent-company
 
 A [Hermes](https://github.com/NousResearch/hermes-agent) plugin that adds a
 **background coder sub-agent** powered by the [Codex CLI](https://github.com/openai/codex).
@@ -39,18 +39,18 @@ It installs entirely as a plugin — **no fork of hermes required**.
 ## Install
 
 ```bash
-hermes plugins install bykim0119/hermes-subagent-coder
-hermes plugins enable subagent_coder
+hermes plugins install bykim0119/hermes-agent-company
+hermes plugins enable agent_company
 ```
 
-This clones the repo into `~/.hermes/plugins/subagent_coder/`. hermes discovers it
+This clones the repo into `~/.hermes/plugins/agent_company/`. hermes discovers it
 on next start and runs its `register(ctx)`.
 
 To update or remove:
 
 ```bash
-hermes plugins update subagent_coder
-hermes plugins remove subagent_coder
+hermes plugins update agent_company
+hermes plugins remove agent_company
 ```
 
 ## Usage
@@ -121,7 +121,7 @@ hermes `config.yaml` → default**:
 
 The package is a **flat layout** — `__init__.py` and its sibling modules live at
 the repo root, because `hermes plugins install` loads the plugin from the repo
-root of the clone. The tests load that flat package as `subagent_coder` (see
+root of the clone. The tests load that flat package as `agent_company` (see
 `tests/conftest.py`).
 
 The tests import and monkey-patch stock hermes modules (`run_agent`, `tools.*`,

@@ -33,7 +33,7 @@ _LOG_TAIL = 20  # status/실패알림에 노출할 로그 tail 이벤트 수
 
 def _max_concurrent() -> int:
     try:
-        from .coder_config import coder_setting
+        from .config import coder_setting
 
         return coder_setting(
             "max_concurrent",
@@ -99,7 +99,7 @@ def _format_log_line(evt: Dict[str, Any]) -> str:
 
 
 def _build_completion_text(coder_run_id: str, snap: Dict[str, Any]) -> str:
-    from .coder_roles import get_role
+    from .roles import get_role
 
     role_cfg = get_role(snap.get("role"))
     label = role_cfg.result_label

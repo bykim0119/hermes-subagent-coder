@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from subagent_coder import _install_discord_coder_overlay
-from subagent_coder import discord_overlay
+from agent_company import _install_discord_coder_overlay
+from agent_company import discord_overlay
 
 
 def _is_adapter_module(name):
@@ -140,7 +140,7 @@ def test_overlay_attaches_coder_methods(monkeypatch):
     cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
     for name in _CODER_METHODS:
         assert callable(getattr(cls, name, None)), f"{name} not attached"
-    assert getattr(cls, "_subagent_coder_overlay_installed", False) is True
+    assert getattr(cls, "_agent_company_overlay_installed", False) is True
 
 
 def test_overlay_install_via_hermes_016_module_path(monkeypatch):
@@ -157,7 +157,7 @@ def test_overlay_install_via_hermes_016_module_path(monkeypatch):
     discord_overlay.install_discord_coder_overlay()
     for name in _CODER_METHODS:
         assert callable(getattr(cls, name, None)), f"{name} not attached (0.16 path)"
-    assert getattr(cls, "_subagent_coder_overlay_installed", False) is True
+    assert getattr(cls, "_agent_company_overlay_installed", False) is True
 
 
 def test_overlay_wraps_plugin_namespaced_live_adapter(monkeypatch):
@@ -180,10 +180,10 @@ def test_overlay_wraps_plugin_namespaced_live_adapter(monkeypatch):
 
     discord_overlay.install_discord_coder_overlay()
 
-    assert getattr(live_cls, "_subagent_coder_overlay_installed", False) is True, \
+    assert getattr(live_cls, "_agent_company_overlay_installed", False) is True, \
         "live (plugin-namespaced) adapter was not wrapped"
     assert callable(getattr(live_cls, "create_coder_thread", None))
-    assert getattr(dead_cls, "_subagent_coder_overlay_installed", False) is False, \
+    assert getattr(dead_cls, "_agent_company_overlay_installed", False) is False, \
         "on-disk adapter should be left untouched"
 
 
@@ -197,12 +197,12 @@ def test_overlay_idempotent(monkeypatch):
 
 # --- __init__ wrap -----------------------------------------------------------
 
-def test_init_wrap_creates_coder_sessions(monkeypatch):
+def test_init_wrap_creates_sessions(monkeypatch):
     cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
     adapter = cls()
     assert adapter.init_called is True  # orig __init__ 실행됨
-    from subagent_coder.coder_sessions import CoderSessionManager
-    assert isinstance(adapter._coder_sessions, CoderSessionManager)
+    from agent_company.sessions import CoderSessionManager
+    assert isinstance(adapter._sessions, CoderSessionManager)
     assert adapter._coder_flusher is None
 
 
@@ -222,8 +222,8 @@ def _make_thread_channel(monkeypatch):
 def test_handle_message_routes_followup(monkeypatch):
     cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
     adapter = cls()
-    adapter._coder_sessions = MagicMock()
-    adapter._coder_sessions.get_coder_by_thread.return_value = "coder-1"
+    adapter._sessions = MagicMock()
+    adapter._sessions.get_coder_by_thread.return_value = "coder-1"
     adapter._handle_coder_followup = AsyncMock()
     adapter._cancel_coder_run = AsyncMock()
 
@@ -233,7 +233,7 @@ def test_handle_message_routes_followup(monkeypatch):
     message.content = "keep going please"
 
     with patch(
-        "subagent_coder.delegate_background.is_cancel_command",
+        "agent_company.delegate_background.is_cancel_command",
         return_value=False,
     ):
         asyncio.run(adapter._handle_message(message))
@@ -243,14 +243,14 @@ def test_handle_message_routes_followup(monkeypatch):
     )
     adapter._cancel_coder_run.assert_not_awaited()
     assert not hasattr(adapter, "handled")  # orig _handle_message 미호출
-    adapter._coder_sessions.touch.assert_called_once_with("coder-1")
+    adapter._sessions.touch.assert_called_once_with("coder-1")
 
 
 def test_handle_message_routes_cancel(monkeypatch):
     cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
     adapter = cls()
-    adapter._coder_sessions = MagicMock()
-    adapter._coder_sessions.get_coder_by_thread.return_value = "coder-9"
+    adapter._sessions = MagicMock()
+    adapter._sessions.get_coder_by_thread.return_value = "coder-9"
     adapter._handle_coder_followup = AsyncMock()
     adapter._cancel_coder_run = AsyncMock()
 
@@ -260,7 +260,7 @@ def test_handle_message_routes_cancel(monkeypatch):
     message.content = "stop"
 
     with patch(
-        "subagent_coder.delegate_background.is_cancel_command",
+        "agent_company.delegate_background.is_cancel_command",
         return_value=True,
     ):
         asyncio.run(adapter._handle_message(message))
@@ -273,9 +273,9 @@ def test_handle_message_routes_cancel(monkeypatch):
 def test_handle_message_falls_through_non_coder_thread(monkeypatch):
     cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
     adapter = cls()
-    adapter._coder_sessions = MagicMock()
+    adapter._sessions = MagicMock()
     # thread이지만 바인딩된 코더 없음
-    adapter._coder_sessions.get_coder_by_thread.return_value = None
+    adapter._sessions.get_coder_by_thread.return_value = None
 
     channel = _make_thread_channel(monkeypatch)
     message = MagicMock()
@@ -290,7 +290,7 @@ def test_handle_message_falls_through_non_coder_thread(monkeypatch):
 def test_handle_message_falls_through_non_thread(monkeypatch):
     cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
     adapter = cls()
-    adapter._coder_sessions = MagicMock()
+    adapter._sessions = MagicMock()
 
     _make_thread_channel(monkeypatch)  # discord.Thread 치환
     message = MagicMock()
@@ -300,7 +300,7 @@ def test_handle_message_falls_through_non_thread(monkeypatch):
     result = asyncio.run(adapter._handle_message(message))
     assert result == "orig_handle"
     assert adapter.handled is message
-    adapter._coder_sessions.get_coder_by_thread.assert_not_called()
+    adapter._sessions.get_coder_by_thread.assert_not_called()
 
 
 # --- _register_slash_commands wrap (/code) -----------------------------------
@@ -332,12 +332,12 @@ def test_register_slash_noop_without_client(monkeypatch):
 def test_disconnect_unregisters_bus(monkeypatch):
     cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
     adapter = cls()
-    adapter._coder_sessions = MagicMock()
+    adapter._sessions = MagicMock()
 
     with patch(
-        "subagent_coder.coder_event_bus.unregister_handler"
+        "agent_company.event_bus.unregister_handler"
     ) as mock_unreg, patch(
-        "subagent_coder.coder_sessions.get_global_sessions",
+        "agent_company.sessions.get_global_sessions",
         return_value=None,
     ):
         result = asyncio.run(adapter.disconnect())
@@ -355,12 +355,12 @@ def test_post_connect_starts_flusher_and_registers(monkeypatch):
 
     fake_flusher = MagicMock()
     with patch(
-        "subagent_coder.coder_progress_formatter.DebouncedFlusher",
+        "agent_company.progress_formatter.DebouncedFlusher",
         return_value=fake_flusher,
     ), patch(
-        "subagent_coder.coder_event_bus.register_handler"
+        "agent_company.event_bus.register_handler"
     ) as mock_reg, patch(
-        "subagent_coder.coder_sessions.set_global_sessions"
+        "agent_company.sessions.set_global_sessions"
     ):
         result = asyncio.run(adapter._run_post_connect_initialization())
 
@@ -393,10 +393,10 @@ def test_retrofit_wires_live_adapter_state(monkeypatch):
 
     discord_overlay._retrofit_live_discord_adapter()
 
-    from subagent_coder.coder_sessions import CoderSessionManager
-    assert isinstance(adapter._coder_sessions, CoderSessionManager)
+    from agent_company.sessions import CoderSessionManager
+    assert isinstance(adapter._sessions, CoderSessionManager)
     assert adapter._coder_flusher is None
-    assert adapter._subagent_coder_retrofitted is True
+    assert adapter._agent_company_retrofitted is True
 
 
 def test_retrofit_noop_without_runner(monkeypatch):

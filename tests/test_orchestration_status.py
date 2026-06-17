@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from subagent_coder import coder_orchestration as orch
-from subagent_coder import delegate_background as db
+from agent_company import orchestration as orch
+from agent_company import delegate_background as db
 
 
 @pytest.fixture(autouse=True)
@@ -175,7 +175,7 @@ def test_delegate_background_return_has_yield_note():
     agent = MagicMock()
     agent.task_id = "t1"
     with patch.object(db, "_spawn_detached_coder"), \
-         patch("subagent_coder.coder_config.check_codex_auth", return_value=None):
+         patch("agent_company.config.check_codex_auth", return_value=None):
         result = db.delegate_task_background(parent_agent=agent, goal="g")
     assert result["status"] == "spawned"
     assert result["note"] == db.YIELD_NOTE

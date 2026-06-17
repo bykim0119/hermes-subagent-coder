@@ -1,4 +1,4 @@
-"""subagent_coder.register(ctx)가 codex-exec를 hermes_cli.auth에 등록해야 한다.
+"""agent_company.register(ctx)가 codex-exec를 hermes_cli.auth에 등록해야 한다.
 
 stock auth.py는 codex-exec를 모르고 resolve_external_process_provider_credentials는
 copilot-acp 전용 하드코드다. register(ctx)는 (1) PROVIDER_REGISTRY에 codex-exec
@@ -14,7 +14,7 @@ def test_codex_exec_registered_after_register():
     # 격리: 이전 테스트가 이미 등록했을 수 있으니 register만으로 복원되는지
     auth.PROVIDER_REGISTRY.pop("codex-exec", None)
 
-    from subagent_coder import register
+    from agent_company import register
 
     register(MagicMock())
 
@@ -23,14 +23,14 @@ def test_codex_exec_registered_after_register():
     pconfig = auth.PROVIDER_REGISTRY["codex-exec"]
     assert pconfig.auth_type == "external_process"
     assert pconfig.inference_base_url == "codex-exec://local"
-    assert getattr(auth, "_subagent_coder_resolver_wrapped", False), \
+    assert getattr(auth, "_agent_company_resolver_wrapped", False), \
         "resolve_external_process_provider_credentials가 wrap되지 않음"
 
 
 def test_resolve_codex_exec_via_wrap(monkeypatch):
     """wrap된 resolver가 codex-exec creds를 올바르게 반환."""
     import hermes_cli.auth as auth
-    from subagent_coder import _install_codex_exec_auth
+    from agent_company import _install_codex_exec_auth
 
     monkeypatch.delenv("HERMES_CODER_COMMAND", raising=False)
     monkeypatch.delenv("HERMES_CODER_ARGS", raising=False)
@@ -51,7 +51,7 @@ def test_resolve_codex_exec_via_wrap(monkeypatch):
 def test_copilot_acp_still_falls_through_to_stock(monkeypatch):
     """비-codex 외부프로세스 provider는 stock resolver로 위임."""
     import hermes_cli.auth as auth
-    from subagent_coder import _install_codex_exec_auth
+    from agent_company import _install_codex_exec_auth
 
     monkeypatch.setenv("HERMES_COPILOT_ACP_ARGS", "--acp --stdio")
     monkeypatch.setattr(

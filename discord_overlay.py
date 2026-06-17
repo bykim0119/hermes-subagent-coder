@@ -6,7 +6,7 @@ Externalizes every coder-specific addition that previously lived inline in
 coder helper methods onto ``DiscordAdapter`` via ``setattr`` and wraps a handful
 of stock methods to add coder behavior without editing the stock module:
 
-  * ``__init__``                       POST-wrap → create ``_coder_sessions`` + ``_coder_flusher`` slot
+  * ``__init__``                       POST-wrap → create ``_sessions`` + ``_coder_flusher`` slot
   * ``_run_post_connect_initialization`` POST-wrap → start the progress flusher + register on the coder event bus
   * ``disconnect``                     PRE-wrap → detach from the bus + clear global sessions
   * ``_handle_message``                wrap → route messages in coder-bound threads to the coder (cancel / follow-up)
@@ -30,7 +30,7 @@ try:
 except ImportError:  # discord is an optional platform extra in hermes >=0.16
     discord = None  # type: ignore[assignment]
 
-from .coder_progress_formatter import format_event as _format_coder_event
+from .progress_formatter import format_event as _format_coder_event
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ async def create_coder_thread(
 
     Called from gateway/run.py via ``coder_spawn_callback`` when the LLM
     invokes ``delegate_task_background``. Sends an anchor message, opens a
-    thread off it, and registers the binding in ``_coder_sessions`` so
+    thread off it, and registers the binding in ``_sessions`` so
     Phase-2 progress routing (subagent_progress events) and follow-up
     replies in the thread can resolve back to the right coder run.
 
@@ -103,7 +103,7 @@ async def create_coder_thread(
         # 역할 라벨(코더/플래너/…)은 레지스트리에 기록된 run의 role로 해석한다.
         # spawn 콜백은 _register_coder_run 이후 발화하므로 이 시점에 role이 있다.
         from . import delegate_background as _db
-        from .coder_roles import get_role
+        from .roles import get_role
         _rec = _db.get_coder_run(coder_run_id)
         _label = get_role(_rec.get("role") if _rec else None).result_label
         anchor = await channel.send(
@@ -115,7 +115,7 @@ async def create_coder_thread(
             auto_archive_duration=1440,
         )
         try:
-            self._coder_sessions.bind(
+            self._sessions.bind(
                 coder_run_id=coder_run_id,
                 thread_id=str(thread.id),
                 parent_channel_id=str(channel.id),
@@ -145,7 +145,7 @@ async def create_coder_thread(
 async def on_coder_event(self, subagent_id: str, event: dict) -> None:
     """Route a coder NDJSON event to the bound Discord thread.
 
-    Invoked via ``plugins.subagent_coder.coder_event_bus`` from the coder sink (which
+    Invoked via ``plugins.agent_company.event_bus`` from the coder sink (which
     lives in a background daemon thread spawned by delegate_task_background
     or by ``_handle_coder_followup``). Lookup is cheap and tolerant —
     unknown coder_run_ids drop silently because a thread bind may not yet
@@ -154,7 +154,7 @@ async def on_coder_event(self, subagent_id: str, event: dict) -> None:
     """
     if not subagent_id or not event:
         return
-    thread_id = self._coder_sessions.get_thread(subagent_id)
+    thread_id = self._sessions.get_thread(subagent_id)
     if not thread_id:
         return
     text = _format_coder_event(event)
@@ -165,7 +165,7 @@ async def on_coder_event(self, subagent_id: str, event: dict) -> None:
         return
     await self._coder_flusher.add(thread_id, text)
     try:
-        self._coder_sessions.touch(subagent_id)
+        self._sessions.touch(subagent_id)
     except Exception:
         pass
 
@@ -203,7 +203,7 @@ async def _handle_code_slash(
     # Pre-check codex auth so the user sees a specific message instead
     # of an opaque process failure inside the thread.
     try:
-        from .coder_config import check_codex_auth
+        from .config import check_codex_auth
         auth_err = check_codex_auth()
     except Exception:
         auth_err = None  # never block on the pre-check itself
@@ -225,7 +225,7 @@ async def _handle_code_slash(
 
     _register_coder_run(coder_run_id, parent_task_id, task)
 
-    # Create thread (anchor message + bind to coder_sessions). If we're
+    # Create thread (anchor message + bind to sessions). If we're
     # inside an existing thread, anchor in the parent channel — Discord
     # disallows nested threads.
     try:
@@ -307,9 +307,9 @@ async def _cancel_coder_run(
     except Exception:
         logger.debug("cancel announce failed", exc_info=True)
     try:
-        self._coder_sessions.unbind(coder_run_id)
+        self._sessions.unbind(coder_run_id)
     except Exception:
-        logger.debug("coder_sessions.unbind failed", exc_info=True)
+        logger.debug("sessions.unbind failed", exc_info=True)
 
 
 async def _handle_coder_followup(
@@ -330,7 +330,7 @@ async def _handle_coder_followup(
     if not text or not text.strip():
         return
     try:
-        from .coder_config import check_codex_auth
+        from .config import check_codex_auth
         auth_err = check_codex_auth()
     except Exception:
         auth_err = None
@@ -340,7 +340,7 @@ async def _handle_coder_followup(
         except Exception:
             pass
         return
-    codex_session_id = self._coder_sessions.get_codex_session_id(coder_run_id)
+    codex_session_id = self._sessions.get_codex_session_id(coder_run_id)
     if not codex_session_id:
         try:
             await thread.send(
@@ -375,11 +375,11 @@ async def _handle_coder_followup(
 # ----------------------------------------------------------------------
 
 def _ensure_coder_state(self) -> None:
-    """Create ``_coder_sessions`` + ``_coder_flusher`` on the adapter if absent."""
-    if getattr(self, "_coder_sessions", None) is None:
-        from .coder_config import coder_setting
-        from .coder_sessions import CoderSessionManager
-        self._coder_sessions = CoderSessionManager(
+    """Create ``_sessions`` + ``_coder_flusher`` on the adapter if absent."""
+    if getattr(self, "_sessions", None) is None:
+        from .config import coder_setting
+        from .sessions import CoderSessionManager
+        self._sessions = CoderSessionManager(
             idle_timeout_seconds=coder_setting(
                 "idle_timeout_seconds",
                 env_var="HERMES_CODER_IDLE_TIMEOUT_S",
@@ -408,8 +408,8 @@ def _start_coder_progress(self) -> None:
 
     _ensure_coder_state(self)
     if getattr(self, "_coder_flusher", None) is None:
-        from .coder_config import coder_setting
-        from .coder_progress_formatter import DebouncedFlusher
+        from .config import coder_setting
+        from .progress_formatter import DebouncedFlusher
         self._coder_flusher = DebouncedFlusher(
             interval_ms=coder_setting(
                 "progress_debounce_ms",
@@ -425,16 +425,16 @@ def _start_coder_progress(self) -> None:
     # events to our threads. set_global_sessions exposes our CoderSessionManager
     # so the sink captures codex session UUIDs.
     try:
-        from . import coder_event_bus
-        from .coder_sessions import set_global_sessions
+        from . import event_bus
+        from .sessions import set_global_sessions
 
-        set_global_sessions(self._coder_sessions)
-        coder_event_bus.register_handler(
+        set_global_sessions(self._sessions)
+        event_bus.register_handler(
             self.on_coder_event,
             asyncio.get_running_loop(),
         )
     except Exception as _e:
-        logger.debug("[%s] coder_event_bus register failed: %s", self.name, _e)
+        logger.debug("[%s] event_bus register failed: %s", self.name, _e)
 
 
 def _add_code_command(self) -> None:
@@ -529,10 +529,10 @@ def install_discord_coder_overlay() -> None:
     DiscordAdapter = _resolve_live_discord_adapter()
     if DiscordAdapter is None:
         logger.debug(
-            "subagent_coder: Discord adapter class unavailable — skipping Discord overlay"
+            "agent_company: Discord adapter class unavailable — skipping Discord overlay"
         )
         return
-    if getattr(DiscordAdapter, "_subagent_coder_overlay_installed", False):
+    if getattr(DiscordAdapter, "_agent_company_overlay_installed", False):
         _retrofit_live_discord_adapter()  # discovery may re-run; ensure live wiring
         return
 
@@ -573,11 +573,11 @@ def install_discord_coder_overlay() -> None:
 
     async def _wrapped_disconnect(self, *args, **kwargs):
         try:
-            from . import coder_event_bus
-            from .coder_sessions import get_global_sessions, set_global_sessions
+            from . import event_bus
+            from .sessions import get_global_sessions, set_global_sessions
 
-            coder_event_bus.unregister_handler(self.on_coder_event)
-            if get_global_sessions() is getattr(self, "_coder_sessions", None):
+            event_bus.unregister_handler(self.on_coder_event)
+            if get_global_sessions() is getattr(self, "_sessions", None):
                 set_global_sessions(None)
         except Exception:
             pass
@@ -592,7 +592,7 @@ def install_discord_coder_overlay() -> None:
     _orig_handle_message = DiscordAdapter._handle_message
 
     async def _wrapped_handle_message(self, message):
-        sessions = getattr(self, "_coder_sessions", None)
+        sessions = getattr(self, "_sessions", None)
         if sessions is not None and isinstance(message.channel, discord.Thread):
             _cid = sessions.get_coder_by_thread(str(message.channel.id))
             if _cid:
@@ -620,8 +620,8 @@ def install_discord_coder_overlay() -> None:
 
     DiscordAdapter._register_slash_commands = _wrapped_register_slash
 
-    DiscordAdapter._subagent_coder_overlay_installed = True
-    logger.info("subagent_coder: DiscordAdapter coder overlay installed")
+    DiscordAdapter._agent_company_overlay_installed = True
+    logger.info("agent_company: DiscordAdapter coder overlay installed")
 
     # 7. Retrofit a live adapter if discovery ran after it connected.
     _retrofit_live_discord_adapter()
@@ -651,9 +651,9 @@ def _retrofit_live_discord_adapter() -> None:
             break
     if adapter is None:
         return
-    if getattr(adapter, "_subagent_coder_retrofitted", False):
+    if getattr(adapter, "_agent_company_retrofitted", False):
         return
-    adapter._subagent_coder_retrofitted = True
+    adapter._agent_company_retrofitted = True
 
     _ensure_coder_state(adapter)
 
@@ -667,20 +667,20 @@ def _retrofit_live_discord_adapter() -> None:
         try:
             _add_code_command(adapter)
         except Exception:
-            logger.debug("subagent_coder: retrofit add /code failed", exc_info=True)
+            logger.debug("agent_company: retrofit add /code failed", exc_info=True)
         try:
             _start_coder_progress(adapter)
         except Exception:
-            logger.debug("subagent_coder: retrofit start progress failed", exc_info=True)
+            logger.debug("agent_company: retrofit start progress failed", exc_info=True)
         try:
             await adapter._client.tree.sync()
             logger.info(
-                "subagent_coder: retrofitted live DiscordAdapter (/code added + synced)"
+                "agent_company: retrofitted live DiscordAdapter (/code added + synced)"
             )
         except Exception:
-            logger.debug("subagent_coder: retrofit tree.sync failed", exc_info=True)
+            logger.debug("agent_company: retrofit tree.sync failed", exc_info=True)
 
     try:
         asyncio.run_coroutine_threadsafe(_retro(), loop)
     except Exception:
-        logger.debug("subagent_coder: retrofit schedule failed", exc_info=True)
+        logger.debug("agent_company: retrofit schedule failed", exc_info=True)

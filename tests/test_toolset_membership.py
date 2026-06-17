@@ -7,7 +7,7 @@ delegation)에 런타임 추가하는지 확인.
 import toolsets
 from toolsets import resolve_toolset
 
-from subagent_coder import _install_coder_toolset_membership
+from agent_company import _install_coder_toolset_membership
 
 
 def test_added_to_core_and_delegation():
@@ -18,9 +18,9 @@ def test_added_to_core_and_delegation():
 
 
 def test_orchestration_tools_added():
-    from subagent_coder import coder_orchestration
-    coder_orchestration.register_orchestration_tools()
-    coder_orchestration.install_orchestration_toolset_membership()
+    from agent_company import orchestration
+    orchestration.register_orchestration_tools()
+    orchestration.install_orchestration_toolset_membership()
     for name in ("coder_status", "cancel_coder"):
         assert name in toolsets._HERMES_CORE_TOOLS
         assert name in resolve_toolset("delegation")

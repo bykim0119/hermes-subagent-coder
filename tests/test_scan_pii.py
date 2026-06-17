@@ -1,5 +1,5 @@
 """scan_pii — redact 재사용 탐지·마스킹·toolset 멤버십 검증."""
-from subagent_coder import scan_pii_tool as sp
+from agent_company import scan_pii_tool as sp
 
 
 def test_scan_pii_finds_email_and_masks(tmp_path):

@@ -11,7 +11,7 @@ import types
 from unittest.mock import MagicMock, patch
 
 from run_agent import AIAgent
-from subagent_coder import (
+from agent_company import (
     _build_coder_spawn_callback,
     _coder_spawn_cb_ctx,
     _install_gateway_coder_spawn_wraps,
@@ -104,7 +104,7 @@ def test_run_conversation_wrap_installs_callback_from_ctx(monkeypatch):
         return "ok"
 
     monkeypatch.setattr(AIAgent, "run_conversation", fake_run_conversation)
-    monkeypatch.setattr(AIAgent, "_subagent_coder_run_conversation_wrapped", False, raising=False)
+    monkeypatch.setattr(AIAgent, "_agent_company_run_conversation_wrapped", False, raising=False)
     # CLI 모드 시뮬: gateway.run 미로드 → run_conversation만 wrap
     monkeypatch.delitem(sys.modules, "gateway.run", raising=False)
     _install_gateway_coder_spawn_wraps()
@@ -127,7 +127,7 @@ def test_run_conversation_wrap_noop_without_ctx(monkeypatch):
         return "ok"
 
     monkeypatch.setattr(AIAgent, "run_conversation", fake_run_conversation)
-    monkeypatch.setattr(AIAgent, "_subagent_coder_run_conversation_wrapped", False, raising=False)
+    monkeypatch.setattr(AIAgent, "_agent_company_run_conversation_wrapped", False, raising=False)
     monkeypatch.delitem(sys.modules, "gateway.run", raising=False)
     _install_gateway_coder_spawn_wraps()
 
@@ -165,10 +165,10 @@ def test_run_agent_wrap_sets_ctx_during_turn(monkeypatch):
     fake_mod.GatewayRunner = FakeGatewayRunner
     monkeypatch.setitem(sys.modules, "gateway.run", fake_mod)
     # run_conversation wrap sentinel은 영향 없게 리셋
-    monkeypatch.setattr(AIAgent, "_subagent_coder_run_conversation_wrapped", False, raising=False)
+    monkeypatch.setattr(AIAgent, "_agent_company_run_conversation_wrapped", False, raising=False)
 
     _install_gateway_coder_spawn_wraps()
-    assert getattr(FakeGatewayRunner, "_subagent_coder_run_agent_wrapped", False)
+    assert getattr(FakeGatewayRunner, "_agent_company_run_agent_wrapped", False)
 
     runner = FakeGatewayRunner()
     src = _make_source()

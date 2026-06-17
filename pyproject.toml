@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hermes-subagent-coder"
+name = "hermes-agent-company"
 version = "0.1.0"
 description = "Codex coder sub-agent plugin for Hermes (delegate_task_background + Discord overlay)"
 readme = "README.md"

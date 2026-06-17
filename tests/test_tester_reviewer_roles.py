@@ -1,8 +1,8 @@
 """역할 fleet 2차 — tester·reviewer 등록·필드·스폰·안내문·enum 검증."""
 from unittest.mock import MagicMock, patch
 
-from subagent_coder import coder_roles as cr
-from subagent_coder import delegate_background as db
+from agent_company import roles as cr
+from agent_company import delegate_background as db
 
 
 def test_tester_role_codex_with_test_instructions():
@@ -40,10 +40,10 @@ def test_spawn_tester_codex_path_injects_instructions():
         return "tested"
 
     with patch("tools.delegate_tool.delegate_task", fake_delegate_task), \
-         patch("subagent_coder.codex_exec_client.register_coder_sink"), \
-         patch("subagent_coder.codex_exec_client.unregister_coder_sink"), \
-         patch("subagent_coder.coder_orchestration.notify_main_on_completion"):
-        from subagent_coder.coder_roles import get_role
+         patch("agent_company.codex_exec_client.register_coder_sink"), \
+         patch("agent_company.codex_exec_client.unregister_coder_sink"), \
+         patch("agent_company.orchestration.notify_main_on_completion"):
+        from agent_company.roles import get_role
         db._spawn_detached_coder(MagicMock(), "그 모듈 테스트해", "", "rt", get_role("tester"))
         import time; time.sleep(0.2)
 
@@ -66,10 +66,10 @@ def test_spawn_reviewer_reasoning_path_with_pii_toolset():
         return "reviewed"
 
     with patch("tools.delegate_tool.delegate_task", fake_delegate_task), \
-         patch("subagent_coder.codex_exec_client.register_coder_sink"), \
-         patch("subagent_coder.codex_exec_client.unregister_coder_sink"), \
-         patch("subagent_coder.coder_orchestration.notify_main_on_completion"):
-        from subagent_coder.coder_roles import get_role
+         patch("agent_company.codex_exec_client.register_coder_sink"), \
+         patch("agent_company.codex_exec_client.unregister_coder_sink"), \
+         patch("agent_company.orchestration.notify_main_on_completion"):
+        from agent_company.roles import get_role
         db._spawn_detached_coder(MagicMock(), "이 결과물 리뷰해", "", "rr", get_role("reviewer"))
         import time; time.sleep(0.2)
 

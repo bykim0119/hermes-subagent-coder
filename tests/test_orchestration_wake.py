@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from subagent_coder import delegate_background as db
+from agent_company import delegate_background as db
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +44,7 @@ def test_sink_captures_events_into_log():
 
 
 def test_spawn_callback_records_routing():
-    from subagent_coder import _build_coder_spawn_callback
+    from agent_company import _build_coder_spawn_callback
 
     db._register_coder_run("coder-cb", "parent", "goal")
     adapter = MagicMock()
@@ -67,7 +67,7 @@ def test_spawn_callback_records_routing():
 
 # --- 완료 웨이크 -------------------------------------------------------------
 
-from subagent_coder import coder_orchestration as orch
+from agent_company import orchestration as orch
 
 
 def _install_fake_gateway(monkeypatch, adapter):

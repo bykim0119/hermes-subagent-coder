@@ -13,13 +13,13 @@ from unittest.mock import MagicMock, patch
 
 import run_agent
 from run_agent import AIAgent
-from subagent_coder.delegate_background import _dispatch_parent_agent
+from agent_company.delegate_background import _dispatch_parent_agent
 
 
 # --- sequential dispatch wrap + handler 폴백 ---------------------------------
 
 def test_sequential_wrap_sets_parent_agent_contextvar(monkeypatch):
-    from subagent_coder import _install_sequential_dispatch_wrap
+    from agent_company import _install_sequential_dispatch_wrap
 
     seen = {}
 
@@ -28,7 +28,7 @@ def test_sequential_wrap_sets_parent_agent_contextvar(monkeypatch):
         return "done"
 
     monkeypatch.setattr(AIAgent, "_execute_tool_calls_sequential", fake_sequential)
-    monkeypatch.setattr(AIAgent, "_subagent_coder_sequential_wrapped", False, raising=False)
+    monkeypatch.setattr(AIAgent, "_agent_company_sequential_wrapped", False, raising=False)
     _install_sequential_dispatch_wrap()
 
     agent = MagicMock()
@@ -44,7 +44,7 @@ def test_registry_handler_falls_back_to_contextvar(monkeypatch):
     """delegate_task_background이 registry 경로로 dispatch될 때(parent_agent 없음)
     _dispatch_parent_agent ContextVar에서 parent_agent를 끌어온다."""
     from tools.registry import registry
-    import subagent_coder.delegate_background as _db
+    import agent_company.delegate_background as _db
     # Re-assert THIS module's handler (a bundled copy in a dev fork can have
     # re-registered an equivalent handler bound to its own globals).
     _db.register_delegate_task_background()
@@ -53,9 +53,9 @@ def test_registry_handler_falls_back_to_contextvar(monkeypatch):
     agent.task_id = "parent-task"
 
     with patch(
-        "subagent_coder.delegate_background._spawn_detached_coder"
+        "agent_company.delegate_background._spawn_detached_coder"
     ) as mock_spawn, patch(
-        "subagent_coder.coder_config.check_codex_auth", return_value=None
+        "agent_company.config.check_codex_auth", return_value=None
     ):
         token = _dispatch_parent_agent.set(agent)
         try:
@@ -74,7 +74,7 @@ def test_registry_handler_falls_back_to_contextvar(monkeypatch):
 def test_registry_handler_no_agent_returns_error(monkeypatch):
     """ContextVar도 없고 kw에도 parent_agent 없으면 구조화된 에러."""
     from tools.registry import registry
-    import subagent_coder.delegate_background as _db
+    import agent_company.delegate_background as _db
     _db.register_delegate_task_background()
 
     # ContextVar default None 상태
@@ -87,7 +87,7 @@ def test_registry_handler_no_agent_returns_error(monkeypatch):
 # --- codex-exec client factory wrap ------------------------------------------
 
 def test_client_factory_wrap_returns_facade_for_codex_exec(monkeypatch):
-    from subagent_coder import _install_codex_exec_client_factory_wrap
+    from agent_company import _install_codex_exec_client_factory_wrap
 
     orig_called = {"n": 0}
 
@@ -96,7 +96,7 @@ def test_client_factory_wrap_returns_facade_for_codex_exec(monkeypatch):
         return "http-client"
 
     monkeypatch.setattr(AIAgent, "_create_openai_client", fake_orig)
-    monkeypatch.setattr(AIAgent, "_subagent_coder_client_factory_wrapped", False, raising=False)
+    monkeypatch.setattr(AIAgent, "_agent_company_client_factory_wrapped", False, raising=False)
     _install_codex_exec_client_factory_wrap()
 
     fake_facade = object()
@@ -106,7 +106,7 @@ def test_client_factory_wrap_returns_facade_for_codex_exec(monkeypatch):
     agent._client_log_context.return_value = "[ctx]"
 
     with patch(
-        "subagent_coder.codex_exec_client.CodexExecFacade",
+        "agent_company.codex_exec_client.CodexExecFacade",
         return_value=fake_facade,
     ) as mock_facade, patch(
         "hermes_cli.auth.resolve_external_process_provider_credentials",
@@ -124,13 +124,13 @@ def test_client_factory_wrap_returns_facade_for_codex_exec(monkeypatch):
 
 
 def test_client_factory_wrap_passthrough_for_other_providers(monkeypatch):
-    from subagent_coder import _install_codex_exec_client_factory_wrap
+    from agent_company import _install_codex_exec_client_factory_wrap
 
     def fake_orig(self, client_kwargs, *, reason, shared):
         return "http-client"
 
     monkeypatch.setattr(AIAgent, "_create_openai_client", fake_orig)
-    monkeypatch.setattr(AIAgent, "_subagent_coder_client_factory_wrapped", False, raising=False)
+    monkeypatch.setattr(AIAgent, "_agent_company_client_factory_wrapped", False, raising=False)
     _install_codex_exec_client_factory_wrap()
 
     agent = MagicMock()
@@ -145,7 +145,7 @@ def test_client_factory_wrap_passthrough_for_other_providers(monkeypatch):
 # --- coder_spawn_callback slot -----------------------------------------------
 
 def test_coder_spawn_callback_slot_installed():
-    from subagent_coder import _install_coder_spawn_callback_slot
+    from agent_company import _install_coder_spawn_callback_slot
 
     _install_coder_spawn_callback_slot()
     # 클래스 기본값 None — getattr이 항상 resolvable

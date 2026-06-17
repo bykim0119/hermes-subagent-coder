@@ -1,11 +1,11 @@
 """Background coder delegation — spawns a Codex CLI coder child detached.
 
 Moved out of ``tools/delegate_tool.py`` so the stock file stays diff-free and
-``subagent_coder`` is installable as a standalone ``~/.hermes/plugins/`` unit.
+``agent_company`` is installable as a standalone ``~/.hermes/plugins/`` unit.
 
 The coder child runs the STOCK ``delegate_task`` (no coder-specific params).
 Provider / api_mode / subagent_id overrides are injected at runtime by the
-wraps installed in ``subagent_coder.register(ctx)`` via the ``_coder_child_ctx``
+wraps installed in ``agent_company.register(ctx)`` via the ``_coder_child_ctx``
 ContextVar set inside ``_spawn_detached_coder._runner`` below. Because the coder
 spawn is a single-task delegation it runs on the ``_runner`` thread inline (no
 ThreadPoolExecutor boundary), so the ContextVar propagates cleanly.
@@ -31,7 +31,7 @@ from tools.delegate_tool import (
     interrupt_subagent,
 )
 
-from . import coder_roles
+from . import roles
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # Runtime channel for the coder child overrides. Set by ``_spawn_detached_coder``
 # right before calling the stock ``delegate_task`` and read by the wraps around
 # ``_build_child_agent`` / ``_build_child_progress_callback`` (installed in
-# ``subagent_coder.register(ctx)``). ``None`` outside a coder spawn.
+# ``agent_company.register(ctx)``). ``None`` outside a coder spawn.
 _coder_child_ctx: ContextVar[Optional[dict]] = ContextVar(
     "coder_child_ctx", default=None
 )
@@ -48,7 +48,7 @@ _coder_child_ctx: ContextVar[Optional[dict]] = ContextVar(
 # dispatch path. ``registry.dispatch`` never forwards parent_agent, and the
 # sequential loop (``_execute_tool_calls_sequential``) routes unknown registry
 # tools straight to ``handle_function_call`` — so the wrap installed in
-# ``subagent_coder.register(ctx)`` sets this ContextVar to ``self`` around the
+# ``agent_company.register(ctx)`` sets this ContextVar to ``self`` around the
 # loop and the handler below reads it as a fallback. The sequential loop runs
 # on the agent's own thread (no ThreadPoolExecutor), so the ContextVar
 # propagates. The concurrent path injects parent_agent directly via the
@@ -249,7 +249,7 @@ def _build_coder_progress_sink(coder_run_id: str):
     def _sink(event) -> None:
         try:
             if event.event == "thread.started":
-                from .coder_sessions import get_global_sessions
+                from .sessions import get_global_sessions
                 tid = (event.data or {}).get("thread_id")
                 sessions = get_global_sessions()
                 if tid and sessions is not None:
@@ -261,9 +261,9 @@ def _build_coder_progress_sink(coder_run_id: str):
                         rec["log"].append({"event": event.event, "data": event.data})
             except Exception:
                 logger.debug("coder log capture failed", exc_info=True)
-            from . import coder_event_bus
+            from . import event_bus
             payload = {"event": event.event, "data": event.data}
-            coder_event_bus.dispatch(coder_run_id, payload)
+            event_bus.dispatch(coder_run_id, payload)
         except Exception:
             logger.debug("coder progress sink relay failed", exc_info=True)
 
@@ -339,8 +339,8 @@ def _spawn_detached_coder(
                 _coder_child_ctx.reset(token)
             unregister_coder_sink(coder_run_id)
             try:
-                from . import coder_orchestration
-                coder_orchestration.notify_main_on_completion(coder_run_id)
+                from . import orchestration
+                orchestration.notify_main_on_completion(coder_run_id)
             except Exception:
                 logger.debug("completion notify failed", exc_info=True)
 
@@ -366,7 +366,7 @@ def _resolve_codex_command_and_args() -> tuple[str, list[str]]:
     override those, otherwise ``delegation.coder.args`` is meaningless
     on hosts where the auth resolver succeeds with its own args.
     """
-    from .coder_config import coder_setting
+    from .config import coder_setting
 
     explicit_command = coder_setting(
         "command",
@@ -424,7 +424,7 @@ def _spawn_codex_coder(
 
     Both modes share:
       * Gateway-level sink (``_build_coder_progress_sink``) — no parent_agent
-        dependency. Events flow through ``coder_event_bus``.
+        dependency. Events flow through ``event_bus``.
       * Workspace = ``os.getcwd()`` (gateway service cwd) — matches the
         CodexExecFacade default used by ``delegate_task_background``.
 
@@ -538,11 +538,11 @@ def delegate_task_background(
     if not goal:
         return {"error": "delegate_task_background requires a non-empty goal."}
 
-    role_config = coder_roles.get_role(role)
+    role_config = roles.get_role(role)
 
     # codex 역할만 codex 인증을 사전 점검 (추론모델 역할은 메인 자격 사용).
     if role_config.provider == "codex-exec":
-        from .coder_config import check_codex_auth
+        from .config import check_codex_auth
         auth_err = check_codex_auth()
         if auth_err:
             return {
@@ -621,7 +621,7 @@ DELEGATE_TASK_BACKGROUND_SCHEMA = {
 }
 
 
-# Registered at module load (i.e. when subagent_coder.register(ctx) does
+# Registered at module load (i.e. when agent_company.register(ctx) does
 # ``from . import delegate_background``). Dispatch itself is intercepted by the
 # AIAgent._invoke_tool wrap (parent_agent injection); this registration exists
 # so the tool schema/check_fn are advertised to the model.

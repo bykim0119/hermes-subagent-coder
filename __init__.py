@@ -1,4 +1,4 @@
-"""subagent_coder plugin — Codex CLI 기반 코더 서브에이전트.
+"""agent_company plugin — Codex CLI 기반 코더 서브에이전트.
 
 Wires (Task 2~8에서 차례로 채움):
 - delegate_task_background tool (registry.register with parent_agent kw)
@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 
 
 def _relay_child_tool_call(run_id, tool_name, args=None, preview=None):
-    """비-codex 자식의 도구 호출을 coder_event_bus로 relay해 Discord 스레드에 표시.
+    """비-codex 자식의 도구 호출을 event_bus로 relay해 Discord 스레드에 표시.
 
-    coder_progress_formatter.format_event가 받는 ``{"event":"tool_call",...}``
+    progress_formatter.format_event가 받는 ``{"event":"tool_call",...}``
     형식으로 보낸다(임의 도구는 ``🔧 <tool>`` fallback으로 표시). 도구 호출이 아닌
     라이프사이클 이벤트(tool_name 없음)는 무시한다. codex 역할은 호출되지 않는다
     (progress wrap이 use_codex일 때 relay를 건너뜀).
@@ -36,13 +36,13 @@ def _relay_child_tool_call(run_id, tool_name, args=None, preview=None):
     if not tool_name:
         return
     try:
-        from . import coder_event_bus
+        from . import event_bus
         payload = {"event": "tool_call", "tool": tool_name}
         if isinstance(args, dict) and args.get("path"):
             payload["path"] = args["path"]
         if preview:
             payload["preview"] = preview
-        coder_event_bus.dispatch(run_id, payload)
+        event_bus.dispatch(run_id, payload)
     except Exception:
         logger.debug("child progress relay failed", exc_info=True)
 
@@ -63,7 +63,7 @@ def register(ctx) -> None:
 
     ``ctx``는 ``PluginContext(manifest, manager)`` (hermes_cli/plugins.py).
     """
-    logger.info("subagent_coder: register(ctx) started")
+    logger.info("agent_company: register(ctx) started")
     codex_provider.register_codex_provider(ctx)
     _install_codex_exec_auth()
     _install_codex_exec_aux_client_wrap()
@@ -77,15 +77,15 @@ def register(ctx) -> None:
     _install_coder_spawn_callback_slot()
     _install_gateway_coder_spawn_wraps()
     _install_coder_toolset_membership()
-    from . import coder_orchestration
-    coder_orchestration.register_orchestration_tools()
-    coder_orchestration.install_orchestration_toolset_membership()
+    from . import orchestration
+    orchestration.register_orchestration_tools()
+    orchestration.install_orchestration_toolset_membership()
     from . import scan_pii_tool
     scan_pii_tool.register_scan_pii_tool()
     scan_pii_tool.install_pii_toolset()
     _install_discord_coder_overlay()
     logger.info(
-        "subagent_coder: register(ctx) complete "
+        "agent_company: register(ctx) complete "
         "(provider + defaults + delegate_background + dispatch/sequential/child/"
         "client/run_conversation wraps + spawn-callback slot + gateway spawn hook "
         "+ discord overlay)"
@@ -100,7 +100,7 @@ def _install_delegate_dispatch_wrap() -> None:
     parent_agent to handlers — verified, and upstream's own delegate_task uses
     an inline _dispatch for exactly this reason. By wrapping here at register
     time, the coder works on a STOCK hermes (no run_agent.py edits), which is
-    what makes subagent_coder installable as a standalone ~/.hermes/plugins/ unit.
+    what makes agent_company installable as a standalone ~/.hermes/plugins/ unit.
 
     parent_agent is taken from ``self`` directly (not a ContextVar) so it
     survives the concurrent path's worker threads — ContextVars don't propagate
@@ -113,7 +113,7 @@ def _install_delegate_dispatch_wrap() -> None:
 
     from run_agent import AIAgent
 
-    if getattr(AIAgent, "_subagent_coder_dispatch_wrapped", False):
+    if getattr(AIAgent, "_agent_company_dispatch_wrapped", False):
         return
 
     _orig_invoke_tool = AIAgent._invoke_tool
@@ -133,8 +133,8 @@ def _install_delegate_dispatch_wrap() -> None:
         return _orig_invoke_tool(self, function_name, function_args, *args, **kwargs)
 
     AIAgent._invoke_tool = _wrapped_invoke_tool
-    AIAgent._subagent_coder_dispatch_wrapped = True
-    logger.info("subagent_coder: AIAgent._invoke_tool wrapped for coder dispatch")
+    AIAgent._agent_company_dispatch_wrapped = True
+    logger.info("agent_company: AIAgent._invoke_tool wrapped for coder dispatch")
 
 
 def _install_coder_child_wraps() -> None:
@@ -164,7 +164,7 @@ def _install_coder_child_wraps() -> None:
     import tools.delegate_tool as dt
     from .delegate_background import _coder_child_ctx
 
-    if getattr(dt, "_subagent_coder_child_wrapped", False):
+    if getattr(dt, "_agent_company_child_wrapped", False):
         return
 
     _orig_build_child_agent = dt._build_child_agent
@@ -204,9 +204,9 @@ def _install_coder_child_wraps() -> None:
 
     dt._build_child_agent = _wrapped_build_child_agent
     dt._build_child_progress_callback = _wrapped_build_progress_cb
-    dt._subagent_coder_child_wrapped = True
+    dt._agent_company_child_wrapped = True
     logger.info(
-        "subagent_coder: _build_child_agent / _build_child_progress_callback wrapped"
+        "agent_company: _build_child_agent / _build_child_progress_callback wrapped"
     )
 
 
@@ -226,7 +226,7 @@ def _install_sequential_dispatch_wrap() -> None:
     from run_agent import AIAgent
     from .delegate_background import _dispatch_parent_agent
 
-    if getattr(AIAgent, "_subagent_coder_sequential_wrapped", False):
+    if getattr(AIAgent, "_agent_company_sequential_wrapped", False):
         return
 
     _orig_sequential = AIAgent._execute_tool_calls_sequential
@@ -239,8 +239,8 @@ def _install_sequential_dispatch_wrap() -> None:
             _dispatch_parent_agent.reset(token)
 
     AIAgent._execute_tool_calls_sequential = _wrapped_sequential
-    AIAgent._subagent_coder_sequential_wrapped = True
-    logger.info("subagent_coder: AIAgent._execute_tool_calls_sequential wrapped")
+    AIAgent._agent_company_sequential_wrapped = True
+    logger.info("agent_company: AIAgent._execute_tool_calls_sequential wrapped")
 
 
 def _install_codex_exec_client_factory_wrap() -> None:
@@ -255,7 +255,7 @@ def _install_codex_exec_client_factory_wrap() -> None:
     """
     from run_agent import AIAgent
 
-    if getattr(AIAgent, "_subagent_coder_client_factory_wrapped", False):
+    if getattr(AIAgent, "_agent_company_client_factory_wrapped", False):
         return
 
     _orig_create_client = AIAgent._create_openai_client
@@ -288,8 +288,8 @@ def _install_codex_exec_client_factory_wrap() -> None:
         return _orig_create_client(self, client_kwargs, reason=reason, shared=shared)
 
     AIAgent._create_openai_client = _wrapped_create_client
-    AIAgent._subagent_coder_client_factory_wrapped = True
-    logger.info("subagent_coder: AIAgent._create_openai_client wrapped for codex-exec")
+    AIAgent._agent_company_client_factory_wrapped = True
+    logger.info("agent_company: AIAgent._create_openai_client wrapped for codex-exec")
 
 
 def _install_coder_spawn_callback_slot() -> None:
@@ -305,7 +305,7 @@ def _install_coder_spawn_callback_slot() -> None:
 
     if "coder_spawn_callback" not in vars(AIAgent):
         AIAgent.coder_spawn_callback = None
-        logger.info("subagent_coder: AIAgent.coder_spawn_callback slot installed")
+        logger.info("agent_company: AIAgent.coder_spawn_callback slot installed")
 
 
 def _build_coder_spawn_callback(runner, source, session_key, run_generation, loop):
@@ -391,7 +391,7 @@ def _install_gateway_coder_spawn_wraps() -> None:
     from run_agent import AIAgent
 
     # run_conversation wrap — always safe to install (run_agent is core).
-    if not getattr(AIAgent, "_subagent_coder_run_conversation_wrapped", False):
+    if not getattr(AIAgent, "_agent_company_run_conversation_wrapped", False):
         _orig_run_conversation = AIAgent.run_conversation
 
         def _wrapped_run_conversation(self, *args, **kwargs):
@@ -401,8 +401,8 @@ def _install_gateway_coder_spawn_wraps() -> None:
             return _orig_run_conversation(self, *args, **kwargs)
 
         AIAgent.run_conversation = _wrapped_run_conversation
-        AIAgent._subagent_coder_run_conversation_wrapped = True
-        logger.info("subagent_coder: AIAgent.run_conversation wrapped for spawn-callback install")
+        AIAgent._agent_company_run_conversation_wrapped = True
+        logger.info("agent_company: AIAgent.run_conversation wrapped for spawn-callback install")
 
     # GatewayRunner._run_agent wrap — only in gateway mode.
     # Plugin discovery/register can run *before* the CLI lazily imports
@@ -420,15 +420,15 @@ def _install_gateway_coder_spawn_wraps() -> None:
             import gateway.run as gw  # noqa: F811
         except Exception:
             logger.debug(
-                "subagent_coder: could not import gateway.run — skipping _run_agent wrap",
+                "agent_company: could not import gateway.run — skipping _run_agent wrap",
                 exc_info=True,
             )
             return
     GatewayRunner = getattr(gw, "GatewayRunner", None) if gw is not None else None
     if GatewayRunner is None:
-        logger.debug("subagent_coder: gateway.run not loaded — skipping _run_agent wrap (CLI mode)")
+        logger.debug("agent_company: gateway.run not loaded — skipping _run_agent wrap (CLI mode)")
         return
-    if getattr(GatewayRunner, "_subagent_coder_run_agent_wrapped", False):
+    if getattr(GatewayRunner, "_agent_company_run_agent_wrapped", False):
         return
 
     import asyncio
@@ -452,7 +452,7 @@ def _install_gateway_coder_spawn_wraps() -> None:
                 )
                 token = _coder_spawn_cb_ctx.set(cb)
         except Exception:
-            logger.debug("subagent_coder: failed to build coder_spawn_callback", exc_info=True)
+            logger.debug("agent_company: failed to build coder_spawn_callback", exc_info=True)
         try:
             return await _orig_run_agent(self, *args, **kwargs)
         finally:
@@ -460,8 +460,8 @@ def _install_gateway_coder_spawn_wraps() -> None:
                 _coder_spawn_cb_ctx.reset(token)
 
     GatewayRunner._run_agent = _wrapped_run_agent
-    GatewayRunner._subagent_coder_run_agent_wrapped = True
-    logger.info("subagent_coder: GatewayRunner._run_agent wrapped for coder_spawn_callback")
+    GatewayRunner._agent_company_run_agent_wrapped = True
+    logger.info("agent_company: GatewayRunner._run_agent wrapped for coder_spawn_callback")
 
 
 def _install_coder_toolset_membership() -> None:
@@ -496,7 +496,7 @@ def _install_coder_toolset_membership() -> None:
         if "delegate_task" in tools and "delegate_task_background" not in tools:
             tools.append("delegate_task_background")
 
-    logger.info("subagent_coder: delegate_task_background added to delegation toolsets")
+    logger.info("agent_company: delegate_task_background added to delegation toolsets")
 
 
 _CODEX_EXEC_BASE_URL = "codex-exec://local"
@@ -582,7 +582,7 @@ def _install_discord_coder_overlay() -> None:
     )
     if not _gateway_mode:
         logger.debug(
-            "subagent_coder: not in gateway mode — skipping Discord overlay (CLI mode)"
+            "agent_company: not in gateway mode — skipping Discord overlay (CLI mode)"
         )
         return
 
@@ -611,7 +611,7 @@ def _install_codex_exec_auth() -> None:
             base_url_env_var="CODEX_EXEC_BASE_URL",
         )
 
-    if getattr(auth, "_subagent_coder_resolver_wrapped", False):
+    if getattr(auth, "_agent_company_resolver_wrapped", False):
         return
 
     _orig_resolve = auth.resolve_external_process_provider_credentials
@@ -622,8 +622,8 @@ def _install_codex_exec_auth() -> None:
         return _orig_resolve(provider_id)
 
     auth.resolve_external_process_provider_credentials = _wrapped_resolve
-    auth._subagent_coder_resolver_wrapped = True
-    logger.info("subagent_coder: codex-exec registered + resolve_external_process wrapped")
+    auth._agent_company_resolver_wrapped = True
+    logger.info("agent_company: codex-exec registered + resolve_external_process wrapped")
 
 
 def _install_codex_exec_aux_client_wrap() -> None:
@@ -637,7 +637,7 @@ def _install_codex_exec_aux_client_wrap() -> None:
     """
     from agent import auxiliary_client as aux
 
-    if getattr(aux, "_subagent_coder_aux_client_wrapped", False):
+    if getattr(aux, "_agent_company_aux_client_wrapped", False):
         return
 
     _orig_resolve_provider_client = aux.resolve_provider_client
@@ -648,8 +648,8 @@ def _install_codex_exec_aux_client_wrap() -> None:
         return _orig_resolve_provider_client(provider, *args, **kwargs)
 
     aux.resolve_provider_client = _wrapped_resolve_provider_client
-    aux._subagent_coder_aux_client_wrapped = True
-    logger.info("subagent_coder: auxiliary_client.resolve_provider_client wrapped for codex-exec")
+    aux._agent_company_aux_client_wrapped = True
+    logger.info("agent_company: auxiliary_client.resolve_provider_client wrapped for codex-exec")
 
 
 def _resolve_codex_exec_aux_client(

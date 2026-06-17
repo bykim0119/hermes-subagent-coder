@@ -63,7 +63,7 @@ def dispatch(coder_run_id: str, payload: dict) -> None:
         try:
             asyncio.run_coroutine_threadsafe(handler(coder_run_id, payload), loop)
         except Exception:
-            logger.debug("coder_event_bus dispatch failed", exc_info=True)
+            logger.debug("event_bus dispatch failed", exc_info=True)
 
 
 def _reset_for_tests() -> None:

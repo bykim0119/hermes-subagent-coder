@@ -1,14 +1,17 @@
-name: subagent_coder
+name: agent_company
 manifest_version: 1
 version: 0.1.0
-label: "Codex Coder Sub-Agent (Discord)"
+label: "Agent Company — multi-role sub-agents (Discord)"
 author: "bykim0119"
 description: |
-  Background coding delegation via the Codex CLI.
-  Spawns a ``codex exec`` subprocess in a daemon thread and streams live
-  progress to the platform UI. Adds the ``delegate_task_background`` tool plus a
-  Discord overlay (``/code`` slash command + coder-thread follow-ups). The core
-  is platform-agnostic; Discord is the first integration.
+  Background delegation to a *company* of role-specialized sub-agents
+  (planner, coder, tester, reviewer) coordinated by the main agent.
+  Coder/tester run via the Codex CLI (``codex exec``); planner/reviewer use
+  the main reasoning model. Sub-agents run in daemon threads and stream live
+  progress to the platform UI. Adds the ``delegate_task_background`` tool
+  (with a ``role`` parameter) plus a Discord overlay (``/code`` slash command
+  + sub-agent thread follow-ups). The core is platform-agnostic; Discord is
+  the first integration.
 
   Requires the ``codex`` CLI on PATH and Codex auth (``~/.codex/auth.json``).
 provides_tools:

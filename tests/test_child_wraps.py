@@ -8,8 +8,8 @@ stock delegate_task에는 override_provider/subagent_id_override 파라미터가
 from unittest.mock import MagicMock
 
 import tools.delegate_tool as dt
-from subagent_coder import _install_coder_child_wraps
-from subagent_coder.delegate_background import _coder_child_ctx
+from agent_company import _install_coder_child_wraps
+from agent_company.delegate_background import _coder_child_ctx
 
 _CTX = {
     "subagent_id": "coder-abc123",
@@ -24,7 +24,7 @@ def _install_with_stubs(monkeypatch, child_stub, cb_stub):
     원본·sentinel을 복원하므로 다른 테스트와 격리된다."""
     monkeypatch.setattr(dt, "_build_child_agent", child_stub)
     monkeypatch.setattr(dt, "_build_child_progress_callback", cb_stub)
-    monkeypatch.setattr(dt, "_subagent_coder_child_wrapped", False, raising=False)
+    monkeypatch.setattr(dt, "_agent_company_child_wrapped", False, raising=False)
     _install_coder_child_wraps()
 
 
