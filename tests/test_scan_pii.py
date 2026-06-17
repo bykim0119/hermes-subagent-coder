@@ -14,8 +14,11 @@ def test_scan_pii_finds_email_and_masks(tmp_path):
 
 def test_scan_pii_finds_secret_via_redact(tmp_path):
     # redact.py가 아는 토큰 prefix(예: Google AIza...) — 라인이 redact로 변형됨.
+    # 가짜(조작된) 테스트 키. 비밀 스캐너(GitHub 등)가 소스의 통짜 리터럴을 오탐하지
+    # 않도록 조각으로 조립한다 — 런타임 값은 redact가 탐지하는 패턴과 동일.
     f = tmp_path / "cfg.txt"
-    f.write_text('GOOGLE_KEY = "AIzaSyA1234567890abcdefghijklmnopqrstuv"\n')
+    fake_key = "AIza" + "Sy" + "A" + "1234567890abcdefghijklmnopqrstuv"
+    f.write_text(f'GOOGLE_KEY = "{fake_key}"\n')
     out = sp.scan_pii(str(tmp_path))
     assert any(x["type"] == "secret" for x in out["findings"]), out
 
