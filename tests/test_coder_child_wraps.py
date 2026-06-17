@@ -13,6 +13,7 @@ from subagent_coder.delegate_background import _coder_child_ctx
 
 _CTX = {
     "subagent_id": "coder-abc123",
+    "use_codex": True,
     "provider": "codex-exec",
     "api_mode": "chat_completions",
 }

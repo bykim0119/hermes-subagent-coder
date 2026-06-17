@@ -73,7 +73,8 @@ def test_spawn_reviewer_reasoning_path_with_pii_toolset():
         db._spawn_detached_coder(MagicMock(), "이 결과물 리뷰해", "", "rr", get_role("reviewer"))
         import time; time.sleep(0.2)
 
-    assert captured["ctx"] is None                        # 메인 모델(코덱스 override 없음)
+    assert captured["ctx"]["provider"] is None            # 메인 모델(코덱스 override 없음)
+    assert captured["ctx"]["use_codex"] is False
     assert captured["toolsets"] == ["file", "pii"]
     assert "리뷰어" in captured["goal"]                    # 안내문 prepend
     db._CODER_RUN_REGISTRY.clear()

@@ -83,7 +83,7 @@ def test_spawn_planner_uses_reasoning_path():
         import time; time.sleep(0.2)
 
     assert captured["toolsets"] == ["file"]
-    assert captured["ctx"] is None                        # codex override 없음 → 메인 모델
+    assert captured["ctx"]["provider"] is None            # codex override 없음 → 메인 모델
     assert "설계자" in captured["goal"]                    # 안내문 prefix 주입
     assert "그 기능 설계해" in captured["goal"]            # 원 목표 포함
     db._CODER_RUN_REGISTRY.clear()

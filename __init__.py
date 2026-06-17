@@ -149,11 +149,13 @@ def _install_coder_child_wraps() -> None:
 
     def _wrapped_build_child_agent(*args, **kwargs):
         ctx = _coder_child_ctx.get()
-        if ctx is not None:
+        # provider override·_subagent_id 핀은 codex 경로만(현행 보존). 비-codex는
+        # ctx가 있어도 stock 동작 그대로 두고, 진행 relay만 progress wrap이 더한다.
+        if ctx is not None and ctx.get("provider"):
             kwargs["override_provider"] = ctx["provider"]
             kwargs["override_api_mode"] = ctx["api_mode"]
         child = _orig_build_child_agent(*args, **kwargs)
-        if ctx is not None:
+        if ctx is not None and ctx.get("use_codex"):
             child._subagent_id = ctx["subagent_id"]
         return child
 

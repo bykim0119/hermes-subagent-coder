@@ -294,23 +294,23 @@ def _spawn_detached_coder(
         from tools.delegate_tool import delegate_task
 
         register_coder_sink(coder_run_id, sink)
-        token = None
         # 역할 안내문은 경로(codex/추론모델)와 무관하게 goal 앞에 주입한다.
-        # coder는 instructions=""라 prepend 영향이 없고, tester/planner/reviewer는
-        # 자기 안내문을 받는다.
         effective_goal = (
             f"{role_config.instructions}\n\n목표:\n{goal}"
             if role_config.instructions
             else goal
         )
-        if use_codex:
-            token = _coder_child_ctx.set(
-                {
-                    "subagent_id": coder_run_id,
-                    "provider": "codex-exec",
-                    "api_mode": "chat_completions",
-                }
-            )
+        # ctx(번호표)는 모든 역할에서 set한다 — 비-codex 진행 relay가 coder_run_id를
+        # 알아야 하기 때문. provider override·child._subagent_id 세팅은 use_codex로
+        # 가드해 codex만 적용(현행 동작 보존). 진행 relay는 progress wrap이 처리.
+        token = _coder_child_ctx.set(
+            {
+                "subagent_id": coder_run_id,
+                "use_codex": use_codex,
+                "provider": "codex-exec" if use_codex else None,
+                "api_mode": "chat_completions" if use_codex else None,
+            }
+        )
         try:
             result = delegate_task(
                 parent_agent=parent_agent,
