@@ -74,8 +74,10 @@ def _make_stub_adapter_cls():
             self.disconnect_called = True
             return "orig_disc"
 
-        async def _handle_message(self, message):
+        async def _handle_message(self, message, *args, **kwargs):
             self.handled = message
+            self.handle_args = args
+            self.handle_kwargs = kwargs
             return "orig_handle"
 
         def _register_slash_commands(self):
@@ -301,6 +303,26 @@ def test_handle_message_falls_through_non_thread(monkeypatch):
     assert result == "orig_handle"
     assert adapter.handled is message
     adapter._sessions.get_coder_by_thread.assert_not_called()
+
+
+def test_handle_message_forwards_extra_kwargs(monkeypatch):
+    """0.17 회귀 가드: on_message가 ``_handle_message(msg, role_authorized=...)``로
+    호출한다(0.16엔 없던 인자). wrapper가 새 kwarg를 받아 orig로 그대로 넘겨야
+    TypeError 없이 통과한다. 시그니처 변화가 다시 생기면 이 테스트가 잡는다."""
+    cls = _install_on(_make_stub_adapter_cls(), monkeypatch)
+    adapter = cls()
+    adapter._sessions = MagicMock()
+
+    _make_thread_channel(monkeypatch)
+    message = MagicMock()
+    message.channel = object()  # Thread 아님 → orig로 fall through
+    message.content = "hi"
+
+    result = asyncio.run(
+        adapter._handle_message(message, role_authorized=True)
+    )
+    assert result == "orig_handle"
+    assert adapter.handle_kwargs.get("role_authorized") is True
 
 
 # --- _register_slash_commands wrap (/code) -----------------------------------

@@ -591,7 +591,7 @@ def install_discord_coder_overlay() -> None:
     #    reaches here, so ordering is preserved.
     _orig_handle_message = DiscordAdapter._handle_message
 
-    async def _wrapped_handle_message(self, message):
+    async def _wrapped_handle_message(self, message, *args, **kwargs):
         sessions = getattr(self, "_sessions", None)
         if sessions is not None and isinstance(message.channel, discord.Thread):
             _cid = sessions.get_coder_by_thread(str(message.channel.id))
@@ -605,7 +605,7 @@ def install_discord_coder_overlay() -> None:
                     _cid, message.content, message.channel
                 )
                 return
-        return await _orig_handle_message(self, message)
+        return await _orig_handle_message(self, message, *args, **kwargs)
 
     DiscordAdapter._handle_message = _wrapped_handle_message
 
